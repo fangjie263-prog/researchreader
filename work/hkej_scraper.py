@@ -59,6 +59,31 @@ def _fetch(url: str) -> str:
         raise RuntimeError(str(e)) from e
 
 
+def _extract_title(html: str) -> str:
+    """? HTML ???????????: h1 > og:title > title tag."""
+    # 1. <h1>
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", html, re.DOTALL)
+    if m:
+        text = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+        if text:
+            return text
+    # 2. og:title
+        m = re.search(r'property="og:title".*?content="(.*?)"', html, re.DOTALL)
+    if m:
+        text = m.group(1).strip()
+        if text:
+            return text
+    # 3. <title> tag, remove site suffix
+    m = re.search(r"<title>(.*?)</title>", html, re.DOTALL)
+    if m:
+        text = m.group(1).strip()
+        for sep in (" - ", "\u2032", "|"):
+            if sep in text:
+                text = text.split(sep)[0].strip()
+        return text if text else "?"
+    return "?"
+
+
 def scrape(num_pages: int = 5) -> str:
     seen: dict[str, None] = {}
 
@@ -90,12 +115,13 @@ def scrape(num_pages: int = 5) -> str:
         full = BASE + rel
         parts = rel.strip("/").split("/")
         cat = parts[2] if len(parts) > 2 else "?"
-        title = unquote(parts[5]) if len(parts) > 5 else "?"
+        title = "?"
 
         safe_print(f"\r[{i}/{total}] Parsing article ...", end="", flush=True)
 
         try:
             article_html = _fetch(full)
+            title = _extract_title(article_html)
             marker = article_html.find("article-content")
             if marker > 0:
                 rest = article_html[marker:]
@@ -117,7 +143,7 @@ def scrape(num_pages: int = 5) -> str:
             "title": title,
             "url": full,
             "category": cat,
-            "body": body,
+            "content": body,
         })
         if body:
             ok += 1
