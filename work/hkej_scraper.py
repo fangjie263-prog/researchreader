@@ -68,7 +68,7 @@ def _extract_title(html: str) -> str:
         if text:
             return text
     # 2. og:title
-        m = re.search(r'property="og:title".*?content="(.*?)"', html, re.DOTALL)
+    m = re.search(r'property="og:title".*?content="(.*?)"', html, re.DOTALL)
     if m:
         text = m.group(1).strip()
         if text:
@@ -131,6 +131,9 @@ def scrape(num_pages: int = 5) -> str:
                     s = _Stripper()
                     s.feed(inner)
                     body = s.text()
+
+                    # Strip leftover HTML fragment like "article-content'> "
+                    body = re.sub(r"^article-content['\"]?\s*", "", body)
                 else:
                     body = ""
             else:
@@ -141,8 +144,6 @@ def scrape(num_pages: int = 5) -> str:
 
         articles.append({
             "title": title,
-            "url": full,
-            "category": cat,
             "content": body,
         })
         if body:
