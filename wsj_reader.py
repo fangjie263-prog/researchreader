@@ -4,6 +4,8 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Tag
 from ebooklib import epub, ITEM_IMAGE, ITEM_DOCUMENT
 
+from ai_model import AIConfig
+from ai_processor import analyze_articles
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -283,6 +285,12 @@ def main() -> None:
     print(f"  Book title : {book_title}")
     print(f"  Articles   : {len(articles)}")
     print(f"  Images     : {len(image_map)}")
+
+    # Step 2b: AI analysis
+    print('[2b/3] Running AI analysis...')
+    config = AIConfig(enabled=False)
+    articles = analyze_articles(articles, config)
+    print(f'  Analysis complete for {len(articles)} articles')
 
     # Step 3: Save output
     print("[3/3] Saving to output/...")
