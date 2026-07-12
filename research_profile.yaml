@@ -1,0 +1,48 @@
+profile:
+  name: "Private Fund"
+
+research:
+  companies:
+    - NVIDIA
+    - Circle
+    - Apple
+
+  industries:
+    - Semiconductor
+    - Payments
+
+  technology:
+    - AI
+    - Robotics
+    - Stablecoin
+
+  macroeconomics:
+    - Fed
+    - Inflation
+    - Gold
+
+  people:
+    - Jensen Huang
+
+  regions:
+    - United States
+    - China
+
+exclusions:
+  topics:
+    - Sports
+    - Entertainment
+
+presentation:
+  language:
+    summary: bilingual
+    chinese_first: true
+
+  html:
+    show_summary: true
+    show_score: true
+
+processing:
+  max_articles: 20
+
+  minimum_score: 3
