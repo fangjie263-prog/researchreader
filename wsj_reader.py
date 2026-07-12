@@ -288,7 +288,7 @@ def main() -> None:
 
     # Step 2b: AI analysis
     print('[2b/3] Running AI analysis...')
-    config = AIConfig(enabled=False)
+    config = AIConfig(enabled=True)
     articles = analyze_articles(articles, config)
     print(f'  Analysis complete for {len(articles)} articles')
 

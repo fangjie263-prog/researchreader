@@ -26,6 +26,9 @@ class AIService:
 
         Raises :exc:`AIServiceError` on any failure.
         """
+
+        print(">>> ENTER AIService.summarize()")
+
         url = self._config.base_url.rstrip("/") + self._config.endpoint
 
         payload: dict[str, Any] = {
@@ -39,12 +42,16 @@ class AIService:
                         "Do not add commentary or disclaimers."
                     ),
                 },
-                {"role": "user", "content": text},
+                {
+                    "role": "user",
+                    "content": text,
+                },
             ],
             "max_tokens": 300,
         }
 
         body = json.dumps(payload).encode("utf-8")
+
         req = urllib.request.Request(
             url,
             data=body,
@@ -55,16 +62,39 @@ class AIService:
             method="POST",
         )
 
+        print(">>> Sending AI request...")
+        print(f"URL   : {url}")
+        print(f"Model : {self._config.model}")
+
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
+                print(">>> AI response received.")
+
+                result = json.loads(
+                    resp.read().decode("utf-8")
+                )
+
         except urllib.error.URLError as exc:
+            print(">>> AI request failed.")
+            print(f"{type(exc).__name__}: {exc}")
             raise AIServiceError(str(exc)) from exc
+
         except (json.JSONDecodeError, KeyError, IndexError) as exc:
-            raise AIServiceError(f"unexpected response: {exc}") from exc
+            print(">>> AI request failed.")
+            print(f"{type(exc).__name__}: {exc}")
+            raise AIServiceError(
+                f"unexpected response: {exc}"
+            ) from exc
 
         choices: list[dict] = result.get("choices", [])
+
         if not choices:
+            print(">>> Response contains no choices.")
             raise AIServiceError("no choices in response")
 
-        return choices[0]["message"]["content"].strip()
+        summary = choices[0]["message"]["content"].strip()
+
+        print(">>> Summary (first 120 chars):")
+        print(summary[:120])
+
+        return summary

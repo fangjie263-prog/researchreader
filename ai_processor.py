@@ -23,6 +23,7 @@ def analyze_articles(articles: list[dict], config: AIConfig) -> list[dict]:
 
     # Load configuration exclusively from ai_config (env vars).
     ai_cfg = AIServiceConfig.from_env()
+    print(f">>> AI active: {ai_cfg.is_active}")
 
     if ai_cfg.is_active and articles:
         _summarize_first(articles[0], ai_cfg)
