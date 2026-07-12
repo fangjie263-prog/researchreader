@@ -22,12 +22,10 @@ class AIService:
         self._config = config
 
     def summarize(self, text: str) -> str:
-        """Send *text* to the model and return the summary string.
+        """Send *text* to the model and return the raw response string.
 
         Raises :exc:`AIServiceError` on any failure.
         """
-
-        print(">>> ENTER AIService.summarize()")
 
         url = self._config.base_url.rstrip("/") + self._config.endpoint
 
@@ -37,9 +35,16 @@ class AIService:
                 {
                     "role": "system",
                     "content": (
-                        "You are a concise financial-news analyst. "
-                        "Summarise the provided article in 2-3 sentences. "
-                        "Do not add commentary or disclaimers."
+                        "You are a concise financial-news analyst.\n\n"
+                        "Return ONLY a valid JSON object with exactly this schema:\n\n"
+                        "{\n"
+                        '  "summary": "<2-3 sentence summary>",\n'
+                        '  "investment_relevance": <integer 1-5>\n'
+                        "}\n\n"
+                        "Do not output markdown.\n"
+                        "Do not use code fences.\n"
+                        "Do not output explanations.\n"
+                        "Return only the JSON object."
                     ),
                 },
                 {
@@ -62,39 +67,19 @@ class AIService:
             method="POST",
         )
 
-        print(">>> Sending AI request...")
-        print(f"URL   : {url}")
-        print(f"Model : {self._config.model}")
-
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                print(">>> AI response received.")
-
-                result = json.loads(
-                    resp.read().decode("utf-8")
-                )
+                result = json.loads(resp.read().decode("utf-8"))
 
         except urllib.error.URLError as exc:
-            print(">>> AI request failed.")
-            print(f"{type(exc).__name__}: {exc}")
             raise AIServiceError(str(exc)) from exc
 
         except (json.JSONDecodeError, KeyError, IndexError) as exc:
-            print(">>> AI request failed.")
-            print(f"{type(exc).__name__}: {exc}")
-            raise AIServiceError(
-                f"unexpected response: {exc}"
-            ) from exc
+            raise AIServiceError(f"unexpected response: {exc}") from exc
 
         choices: list[dict] = result.get("choices", [])
 
         if not choices:
-            print(">>> Response contains no choices.")
             raise AIServiceError("no choices in response")
 
-        summary = choices[0]["message"]["content"].strip()
-
-        print(">>> Summary (first 120 chars):")
-        print(summary[:120])
-
-        return summary
+        return choices[0]["message"]["content"].strip()
