@@ -18,6 +18,9 @@ def analyze_articles(articles: list[dict], config: AIConfig) -> list[dict]:
 
     ai_cfg = AIServiceConfig.from_env()
 
+    print(">>> is_active =", ai_cfg.is_active)
+    print(">>> api_key =", bool(ai_cfg.api_key))
+
     if ai_cfg.is_active and articles:
         _summarize_first(articles[0], ai_cfg)
 

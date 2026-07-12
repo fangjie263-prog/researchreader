@@ -1,4 +1,5 @@
-﻿import re
+﻿import html
+import re
 from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
@@ -338,8 +339,25 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
         # Annotation
         if art["annotation"]:
             section += f'<blockquote class="annotation">{art["annotation"]}</blockquote>\n'
+        # Analysis
+        analysis = art.get("analysis")
+        if isinstance(analysis, dict):
+            try:
+                relevance = max(0, min(5, int(analysis.get("investment_relevance", 0))))
+            except (ValueError, TypeError):
+                relevance = 0
 
-        # Paragraphs
+            summary = analysis.get("summary", "")
+            stars = "★" * relevance + "☆" * (5 - relevance)
+
+            section += '<div class="analysis-block">\n'
+            section += f'<p class="analysis-stars">{stars}</p>\n'
+            if summary:
+                section += '<p class="analysis-summary-label">Summary</p>\n'
+                section += f'<p class="analysis-summary">{html.escape(summary)}</p>\n'
+            section += '</div>\n'
+
+# Paragraphs
         for para in art["paragraphs"]:
             section += f'<p>{para}</p>\n'
 
@@ -466,6 +484,31 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
     color: #777;
     margin-top: 0.25rem;
   }}
+  .analysis-block {{
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    background: #f8fafc;
+    border-left: 4px solid #2563eb;
+    border-radius: 6px;
+  }}
+  .analysis-stars {{
+    color: #f59e0b;
+    font-size: 1.1rem;
+    margin: 0 0 0.5rem;
+  }}
+  .analysis-summary-label {{
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #475569;
+    margin: 0 0 0.25rem;
+  }}
+  .analysis-summary {{
+    font-size: 0.9rem;
+    color: #333;
+    line-height: 1.5;
+    margin: 0;
+  }}
+
   hr {{
     border: none;
     border-top: 1px solid #ddd;
