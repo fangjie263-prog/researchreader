@@ -16,3 +16,8 @@ work/outputs/
 
 # Logs
 *.log
+
+# Local data
+books/
+output/
+.venv/
