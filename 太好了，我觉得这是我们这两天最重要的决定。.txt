@@ -1,0 +1,321 @@
+太好了，我觉得这是我们这两天最重要的决定。
+
+以后**不是每次开发都重新想怎么做**，而是遵循一套固定流程。这套流程以后会写进 `AGENTS.md`，成为 ResearchReader 项目的开发规范。
+
+---
+
+# ResearchReader Development Workflow v1.0
+
+## Phase 1：Product Discussion（产品讨论）
+
+目的：
+
+> 讨论"为什么做"，而不是"怎么写代码"。
+
+输出：
+
+* 产品目标（Vision）
+* 用户价值
+* 是否值得做
+
+**不写代码。**
+
+---
+
+## Phase 2：Architecture（架构设计）
+
+目的：
+
+> 这个功能属于哪个模块？
+
+输出：
+
+例如：
+
+```text
+Parser
+AI Service
+AI Processor
+Configuration
+Rendering
+```
+
+确定：
+
+* 修改几个文件？
+* 新增几个文件？
+* 是否影响现有架构？
+
+仍然：
+
+**不写代码。**
+
+---
+
+## Phase 3：Sprint Planning（Sprint 规划）
+
+这是我负责的。
+
+每个 Sprint 必须满足：
+
+✅ 一个明确目标
+
+✅ 2 小时以内
+
+✅ 修改 ≤ 3 个文件（原则）
+
+✅ 可运行
+
+✅ 可 Commit
+
+例如：
+
+```
+Sprint 6
+
+目标：
+
+第一篇文章成功调用 Agnes API。
+
+修改：
+
+ai_processor.py
+
+ai_service.py（新增）
+
+config.py（新增）
+
+今天明确不做：
+
+翻译
+
+评分
+
+HTML
+
+OCR
+```
+
+---
+
+## Phase 4：Analyze（Codex）
+
+Prompt 永远类似：
+
+```
+Read the project.
+
+Do not modify any files.
+
+Analyze...
+
+Wait for approval.
+```
+
+Codex：
+
+只能分析。
+
+不能写代码。
+
+---
+
+## Phase 5：Review（ChatGPT）
+
+我负责：
+
+检查：
+
+* 架构是否合理
+* 是否过度设计
+* 有没有更简单的方法
+
+如果通过：
+
+进入下一步。
+
+---
+
+## Phase 6：Implement（Codex）
+
+Prompt：
+
+```
+Implement ONLY this Sprint.
+
+Do not modify unrelated files.
+
+Keep changes minimal.
+
+Show summary after completion.
+```
+
+Codex：
+
+开始写代码。
+
+---
+
+## Phase 7：Test（PowerShell）
+
+由你执行：
+
+```
+python ...
+
+测试
+
+HTML
+
+Git
+```
+
+Codex 不负责测试。
+
+---
+
+## Phase 8：Review Again（ChatGPT）
+
+检查：
+
+* 是否符合 Sprint
+
+不是：
+
+"还能不能继续加功能？"
+
+而是：
+
+> 今天目标完成了吗？
+
+---
+
+## Phase 9：Commit
+
+只有：
+
+测试通过。
+
+才：
+
+```
+git add
+
+git commit
+
+git push
+```
+
+---
+
+# 新需求规则
+
+任何新想法：
+
+例如：
+
+今天突然想到：
+
+OCR。
+
+数据库。
+
+Bloomberg。
+
+语音。
+
+邮件。
+
+**绝不立即开发。**
+
+进入：
+
+```
+Parking Lot
+```
+
+以后：
+
+Sprint Planning
+
+再决定。
+
+---
+
+# 五条黄金原则
+
+我建议以后放到 AGENTS.md 最前面。
+
+## 第一条
+
+> Vision can be ambitious.
+
+> Implementation must be incremental.
+
+（目标可以宏大，实现必须渐进。）
+
+---
+
+## 第二条
+
+一次只解决一个问题。
+
+---
+
+## 第三条
+
+每天结束：
+
+项目必须：
+
+✅ 可运行
+
+✅ 可测试
+
+✅ 可 Commit
+
+---
+
+## 第四条
+
+架构提前。
+
+功能克制。
+
+不要为了未来需求，今天写大量暂时用不到的代码。
+
+---
+
+## 第五条（我觉得最重要）
+
+> **Every Sprint must produce visible value.**
+
+每一个 Sprint，都必须让用户能看到一个真实的进步。
+
+哪怕只是：
+
+今天：
+
+HTML 多了一段：
+
+```
+AI Summary
+```
+
+这也是一个成功的 Sprint。
+
+---
+
+## 我想再增加一条，作为我们的"第六条黄金原则"
+
+这是根据你的特点总结出来的。
+
+> **先把工具做好，再让工具帮助研究。**
+
+ResearchReader 的最终目标不是展示技术，而是帮助你每天更快、更深入地理解市场。所以我们判断一个功能值不值得做，不是看它有多酷，而是问：
+
+> **它能不能让你的研究效率真正提高？**
+
+如果答案是能，我们就把它拆成一个 Sprint；如果不能，再好的点子也先放进 Parking Lot。
+
+我相信，只要我们坚持这套流程，一年以后回头看，ResearchReader 会是一个稳定、持续进化的项目，而不是一个功能很多却难以维护的半成品。
