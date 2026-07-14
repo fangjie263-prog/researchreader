@@ -25,6 +25,12 @@ Test configured providers:
 python run.py --test
 ```
 
+Show resolved global settings:
+
+```bash
+python run.py --settings
+```
+
 The test command checks configuration, API connectivity, configured model availability, and first-token latency.
 
 API keys are read from environment variables:
@@ -33,6 +39,25 @@ API keys are read from environment variables:
 - `DEEPSEEK_API_KEY`
 - `NVIDIA_API_KEY`
 - `OPENROUTER_API_KEY`
+
+## Configuration Center
+
+Global settings live in:
+
+```text
+researchreader/config/settings.toml
+```
+
+The Configuration Center resolves:
+
+- default provider
+- model override, if configured
+- target language
+- concurrency, retry count, and timeout
+- output directory
+- cache and logging defaults
+
+Translation pipelines resolve provider details from the Provider Catalog and environment variables. Callers no longer need to pass API keys or base URLs through `PipelineContext.runtime_options`.
 
 Provider definitions live in the Provider Catalog:
 
