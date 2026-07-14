@@ -4,7 +4,9 @@ import argparse
 from pathlib import Path
 
 from ..config.resolver import ProviderResolver
-from ..config.settings import load_settings
+from ..config.settings import Settings, load_settings
+from ..pipeline import PipelineContext, PipelineResult
+from ..pipeline.translation import TranslationPipeline
 from ..provider_manager import ProviderManager, ProviderSummary
 from ..providers import ProviderTestResult
 
@@ -12,12 +14,19 @@ from ..providers import ProviderTestResult
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ResearchReader")
     parser.add_argument("--config", type=Path, default=None, help="Path to provider catalog directory or config TOML")
-    command_group = parser.add_mutually_exclusive_group(required=True)
+    subparsers = parser.add_subparsers(dest="command")
+    translate_parser = subparsers.add_parser("translate", help="Translate a document through ResearchReader")
+    translate_parser.add_argument("input_path", type=Path, help="Input document path")
+    translate_parser.add_argument("output_path", type=Path, nargs="?", help="Optional output document path")
+
+    command_group = parser.add_mutually_exclusive_group()
     command_group.add_argument("--models", action="store_true", help="List configured provider models")
     command_group.add_argument("--test", action="store_true", help="Test provider connectivity and latency")
     command_group.add_argument("--settings", action="store_true", help="Show resolved ResearchReader settings")
     args = parser.parse_args(argv)
 
+    if args.command == "translate":
+        return _run_translate(args.input_path, args.output_path)
     if args.settings:
         return _print_settings()
 
@@ -33,7 +42,63 @@ def main(argv: list[str] | None = None) -> int:
         results = manager.test_all()
         _print_test_results(results)
         return 0 if all(result.ok for result in results) else 1
+    parser.print_help()
     return 1
+
+
+def _run_translate(input_path: Path, output_path: Path | None) -> int:
+    print("Loading configuration...")
+    try:
+        settings = load_settings()
+        target_path = output_path or _default_translation_output(input_path, settings)
+        context = PipelineContext(source_path=input_path, output_path=target_path)
+        pipeline = TranslationPipeline(
+            settings=settings,
+            provider_resolver=ProviderResolver(settings=settings),
+        )
+    except ValueError as error:
+        print(f"Configuration error: {error}")
+        return 1
+
+    print("Resolving provider...")
+    print("Loading EPUB...")
+    print("Starting translation...")
+    print("Saving translated EPUB...")
+    result = pipeline.execute(context)
+    if not result.ok:
+        print("Translation failed.")
+        _print_pipeline_errors(result)
+        return 1
+
+    print("Done.")
+    _print_translation_summary(result)
+    return 0
+
+
+def _default_translation_output(input_path: Path, settings: Settings) -> Path:
+    source_path = Path(input_path)
+    suffix = source_path.suffix or ".epub"
+    return settings.output_directory / f"{source_path.stem}_translated{suffix}"
+
+
+def _print_translation_summary(result: PipelineResult) -> None:
+    metadata = result.metadata
+    output_file = result.artifacts[0] if result.artifacts else ""
+    print("")
+    print("Translation completed successfully.")
+    print(f"Provider: {metadata.get('provider', '')}")
+    print(f"Model: {metadata.get('model', '')}")
+    print(f"Target language: {metadata.get('target_language', '')}")
+    print(f"Elapsed time: {_format_duration_seconds(result.duration_seconds)}")
+    print(f"Output file: {output_file}")
+
+
+def _print_pipeline_errors(result: PipelineResult) -> None:
+    if not result.errors:
+        print("Unknown error.")
+        return
+    for error in result.errors:
+        print(f"Error: {error}")
 
 
 def _print_settings() -> int:
@@ -154,3 +219,9 @@ def _format_duration(value_ms: float | None) -> str:
     if value_ms is None:
         return "n/a"
     return f"{value_ms / 1000:.1f}s"
+
+
+def _format_duration_seconds(value_seconds: float | None) -> str:
+    if value_seconds is None:
+        return "n/a"
+    return f"{value_seconds:.1f}s"

@@ -32,6 +32,20 @@ pip install epub-translator
 
 **Requirements**: Python 3.11, 3.12, or 3.13
 
+## ResearchReader CLI
+
+ResearchReader is the orchestration layer in this repository. It keeps provider configuration, model selection, and document adapters outside the `epub_translator` backend.
+
+```bash
+python run.py --models
+python run.py --settings
+python run.py --test
+python run.py translate input.epub
+python run.py translate input.epub output.epub
+```
+
+When the output path is omitted, ResearchReader writes to the configured `output_directory` as `<original_name>_translated.epub`. Provider, model, target language, retry, timeout, cache, and logging settings are resolved through `researchreader/config/settings.toml` and the Provider Catalog.
+
 ## Quick Start
 
 ### Using OOMOL Studio (Recommended)

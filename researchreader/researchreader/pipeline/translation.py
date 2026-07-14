@@ -109,6 +109,7 @@ class TranslationPipeline(Pipeline):
         metadata.setdefault("document_type", document_type)
         metadata.setdefault("provider", context.provider)
         metadata.setdefault("model", context.model)
+        metadata.setdefault("target_language", context.target_language)
         return replace(
             result,
             start_time=start_time,

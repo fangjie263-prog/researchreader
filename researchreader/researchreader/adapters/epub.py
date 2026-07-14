@@ -27,12 +27,13 @@ class EPUBAdapter(DocumentAdapter, TranslationAdapter):
     def save(self, document: Any, output_path: Path) -> None:
         if not isinstance(document, EPUBDocument):
             raise ValueError("EPUBAdapter.save expects an EPUBDocument")
-        if document.translated_path is None:
-            raise ValueError("EPUBDocument does not contain a translated output path")
-
         target_path = Path(output_path)
         self._validate_epub_extension(target_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        if document.translated_path is None:
+            if target_path.exists():
+                return
+            raise ValueError("EPUBDocument does not contain a translated output path")
         shutil.copyfile(document.translated_path, target_path)
 
     def detect(self, source_path: Path) -> bool:
@@ -62,13 +63,16 @@ class EPUBAdapter(DocumentAdapter, TranslationAdapter):
             if isinstance(submit, str):
                 submit = backend.SubmitKind[submit]
 
-            backend.translate(
-                source_path=source_path,
-                target_path=output_path,
-                target_language=target_language,
-                submit=submit,
-                llm=llm,
-            )
+            try:
+                backend.translate(
+                    source_path=source_path,
+                    target_path=output_path,
+                    target_language=target_language,
+                    submit=submit,
+                    llm=llm,
+                )
+            finally:
+                self._close_llm(llm)
 
             return PipelineResult(
                 status=PipelineStatus.SUCCESS,
@@ -113,6 +117,23 @@ class EPUBAdapter(DocumentAdapter, TranslationAdapter):
             cache_path=context.runtime_options.get("cache_path"),
             log_dir_path=context.runtime_options.get("log_dir_path"),
         )
+
+    def _close_llm(self, llm: Any) -> None:
+        close = getattr(llm, "close", None)
+        if callable(close):
+            close()
+            return
+
+        executor = getattr(llm, "_executor", None)
+        executor_close = getattr(executor, "close", None)
+        if callable(executor_close):
+            executor_close()
+            return
+
+        client = getattr(executor, "_client", None)
+        client_close = getattr(client, "close", None)
+        if callable(client_close):
+            client_close()
 
     def _validate_source_path(self, source_path: Path) -> None:
         self._validate_epub_extension(source_path)
