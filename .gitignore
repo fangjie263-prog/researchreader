@@ -212,3 +212,32 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ==========================
+# ResearchReader
+# ==========================
+
+# Local configuration
+format.json
+formatdeepseek.json
+
+# Temporary files
+temp/
+output/
+cache/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs
+logs/
+*.log
+
+# Local test scripts
+test.py
+test_api.bat
+
+# OS
+.DS_Store
+Thumbs.db

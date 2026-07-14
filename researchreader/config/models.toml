@@ -1,0 +1,35 @@
+[models."gpt-4o-mini"]
+provider = "openai"
+context_length = 128000
+supports_stream = true
+supports_image = true
+supports_reasoning = true
+supports_embedding = false
+supports_tool_call = true
+
+[models."deepseek-chat"]
+provider = "deepseek"
+context_length = 64000
+supports_stream = true
+supports_image = false
+supports_reasoning = false
+supports_embedding = false
+supports_tool_call = true
+
+[models."meta/llama-3.1-8b-instruct"]
+provider = "nvidia"
+context_length = 128000
+supports_stream = true
+supports_image = false
+supports_reasoning = true
+supports_embedding = false
+supports_tool_call = false
+
+[models."openai/gpt-4o-mini"]
+provider = "openrouter"
+context_length = 128000
+supports_stream = true
+supports_image = true
+supports_reasoning = true
+supports_embedding = false
+supports_tool_call = true
