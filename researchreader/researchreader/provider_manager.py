@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .config import ProviderConfig, load_provider_configs
+from .config import ProviderConfig, load_provider_catalog
 from .models import ModelInfo, ModelRegistry, load_model_registry
 from .providers import ProviderCapabilities, ProviderFactory, ProviderTestResult
 
@@ -16,6 +16,11 @@ class ProviderSummary:
     base_url: str
     model: str
     api_key_env: str
+    description: str
+    provider_type: str
+    country: str
+    website: str
+    enabled: bool
     configured: bool
     configuration_errors: tuple[str, ...]
     models: tuple[ModelInfo, ...]
@@ -34,7 +39,7 @@ class ProviderManager:
 
     @classmethod
     def from_config(cls, config_path: Path | None = None) -> "ProviderManager":
-        return cls(load_provider_configs(config_path))
+        return cls(load_provider_catalog(config_path))
 
     def summaries(self) -> list[ProviderSummary]:
         summaries: list[ProviderSummary] = []
@@ -48,7 +53,12 @@ class ProviderManager:
                     base_url=config.base_url,
                     model=config.model,
                     api_key_env=config.api_key_env,
-                    configured=not errors,
+                    description=config.description,
+                    provider_type=config.provider_type,
+                    country=config.country,
+                    website=config.website,
+                    enabled=config.enabled,
+                    configured=config.enabled and not errors,
                     configuration_errors=errors,
                     models=tuple(self._model_registry.list_models_by_provider(config.name)),
                 )
@@ -58,6 +68,8 @@ class ProviderManager:
     def test_all(self) -> list[ProviderTestResult]:
         results: list[ProviderTestResult] = []
         for config in self._configs:
+            if not config.enabled:
+                continue
             model_info = self._find_model(config.model)
             configuration_errors = self._configuration_errors(config)
             if configuration_errors:
@@ -82,11 +94,11 @@ class ProviderManager:
         return results
 
     def _configuration_errors(self, config: ProviderConfig) -> list[str]:
+        if not config.enabled:
+            return []
         errors = config.validate()
         model_info = self._find_model(config.model)
-        if model_info is None:
-            errors.append(f"model is not registered: {config.model}")
-        elif model_info.provider != config.name:
+        if model_info is not None and model_info.provider != config.name:
             errors.append(
                 f"model '{config.model}' belongs to provider '{model_info.provider}', not '{config.name}'"
             )

@@ -1,0 +1,11 @@
+id = "litellm"
+display_name = "LiteLLM"
+description = "LiteLLM proxy gateway exposing an OpenAI-compatible API."
+provider_type = "gateway"
+country = "Custom"
+website = "https://www.litellm.ai"
+kind = "openai-compatible"
+base_url = "http://localhost:4000/v1"
+api_key_env = "LITELLM_API_KEY"
+default_model = "auto"
+enabled = false

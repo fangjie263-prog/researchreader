@@ -1,0 +1,11 @@
+id = "siliconflow"
+display_name = "SiliconFlow"
+description = "SiliconFlow hosted models through an OpenAI-compatible API."
+provider_type = "official"
+country = "China"
+website = "https://siliconflow.cn"
+kind = "openai-compatible"
+base_url = "https://api.siliconflow.cn/v1"
+api_key_env = "SILICONFLOW_API_KEY"
+default_model = "Qwen/Qwen2.5-7B-Instruct"
+enabled = false

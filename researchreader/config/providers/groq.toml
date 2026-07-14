@@ -1,0 +1,11 @@
+id = "groq"
+display_name = "Groq"
+description = "Groq hosted inference through an OpenAI-compatible API."
+provider_type = "official"
+country = "United States"
+website = "https://groq.com"
+kind = "openai-compatible"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+default_model = "llama-3.1-8b-instant"
+enabled = false

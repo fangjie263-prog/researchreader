@@ -1,0 +1,11 @@
+id = "volcengine"
+display_name = "Volcengine Ark"
+description = "Volcengine Ark model service through an OpenAI-compatible API."
+provider_type = "official"
+country = "China"
+website = "https://www.volcengine.com/product/ark"
+kind = "openai-compatible"
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+api_key_env = "VOLCENGINE_API_KEY"
+default_model = "doubao-seed-1-6"
+enabled = false

@@ -1,0 +1,11 @@
+id = "cerebras"
+display_name = "Cerebras"
+description = "Cerebras inference through an OpenAI-compatible API."
+provider_type = "official"
+country = "United States"
+website = "https://www.cerebras.ai"
+kind = "openai-compatible"
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+default_model = "llama3.1-8b"
+enabled = false

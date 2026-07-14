@@ -92,21 +92,22 @@ class OpenAICompatibleProvider:
         total_time_ms: float | None = None
 
         try:
-            models = self.list_models()
+            timings = self._measure_response_timings()
             connectivity_ok = True
-            model_available = self.config.model in models
-            if not model_available:
-                errors.append(f"configured model is not available: {self.config.model}")
+            model_available = True
+            latency_ms = timings.first_token_latency_ms
+            total_time_ms = timings.total_response_time_ms
         except ProviderError as error:
-            errors.append(str(error))
-
-        if connectivity_ok and model_available:
+            completion_error = str(error)
             try:
-                timings = self._measure_response_timings()
-                latency_ms = timings.first_token_latency_ms
-                total_time_ms = timings.total_response_time_ms
-            except ProviderError as error:
-                errors.append(f"first-token latency test failed: {error}")
+                models = self.list_models()
+                connectivity_ok = True
+                model_available = self.config.model in models
+                if not model_available:
+                    errors.append(f"configured model is not available: {self.config.model}")
+            except ProviderError:
+                pass
+            errors.append(f"completion test failed: {completion_error}")
 
         return ProviderTestResult(
             provider_name=self.config.name,

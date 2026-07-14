@@ -1,27 +1,2 @@
-[providers.openai]
-display_name = "OpenAI"
-kind = "openai-compatible"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-model = "gpt-4o-mini"
-
-[providers.deepseek]
-display_name = "DeepSeek"
-kind = "openai-compatible"
-base_url = "https://api.deepseek.com/v1"
-api_key_env = "DEEPSEEK_API_KEY"
-model = "deepseek-chat"
-
-[providers.nvidia]
-display_name = "NVIDIA"
-kind = "openai-compatible"
-base_url = "https://integrate.api.nvidia.com/v1"
-api_key_env = "NVIDIA_API_KEY"
-model = "meta/llama-3.1-8b-instruct"
-
-[providers.openrouter]
-display_name = "OpenRouter"
-kind = "openai-compatible"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-model = "openai/gpt-4o-mini"
+# General ResearchReader defaults will live here as the platform grows.
+# Provider definitions are loaded from providers.toml.

@@ -1,0 +1,11 @@
+id = "librechat"
+display_name = "LibreChat Gateway"
+description = "LibreChat OpenAI-compatible gateway preset."
+provider_type = "gateway"
+country = "Custom"
+website = "https://www.librechat.ai"
+kind = "openai-compatible"
+base_url = "http://localhost:3080/v1"
+api_key_env = "LIBRECHAT_API_KEY"
+default_model = "auto"
+enabled = false

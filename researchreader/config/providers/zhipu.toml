@@ -1,0 +1,11 @@
+id = "zhipu"
+display_name = "Zhipu AI"
+description = "Zhipu AI GLM models through an OpenAI-compatible API."
+provider_type = "official"
+country = "China"
+website = "https://www.bigmodel.cn"
+kind = "openai-compatible"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+api_key_env = "ZHIPU_API_KEY"
+default_model = "glm-4-flash"
+enabled = false

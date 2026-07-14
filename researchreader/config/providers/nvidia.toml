@@ -1,0 +1,11 @@
+id = "nvidia"
+display_name = "NVIDIA"
+description = "NVIDIA NIM hosted models through an OpenAI-compatible API."
+provider_type = "official"
+country = "United States"
+website = "https://build.nvidia.com"
+kind = "openai-compatible"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+default_model = "meta/llama-3.1-8b-instruct"
+enabled = true

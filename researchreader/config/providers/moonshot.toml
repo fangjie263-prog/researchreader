@@ -1,0 +1,11 @@
+id = "moonshot"
+display_name = "Moonshot AI"
+description = "Moonshot AI Kimi models through an OpenAI-compatible API."
+provider_type = "official"
+country = "China"
+website = "https://www.moonshot.cn"
+kind = "openai-compatible"
+base_url = "https://api.moonshot.cn/v1"
+api_key_env = "MOONSHOT_API_KEY"
+default_model = "moonshot-v1-8k"
+enabled = false

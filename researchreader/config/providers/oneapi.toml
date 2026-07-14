@@ -1,0 +1,11 @@
+id = "oneapi"
+display_name = "OneAPI"
+description = "Self-hosted OneAPI OpenAI-compatible gateway."
+provider_type = "gateway"
+country = "Custom"
+website = "https://github.com/songquanpeng/one-api"
+kind = "openai-compatible"
+base_url = "http://localhost:3000/v1"
+api_key_env = "ONEAPI_API_KEY"
+default_model = "auto"
+enabled = false

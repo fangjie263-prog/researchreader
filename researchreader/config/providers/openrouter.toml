@@ -1,0 +1,11 @@
+id = "openrouter"
+display_name = "OpenRouter"
+description = "OpenRouter model gateway with OpenAI-compatible chat completions."
+provider_type = "official"
+country = "United States"
+website = "https://openrouter.ai"
+kind = "openai-compatible"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+default_model = "openai/gpt-4o-mini"
+enabled = true

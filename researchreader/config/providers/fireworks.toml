@@ -1,0 +1,11 @@
+id = "fireworks"
+display_name = "Fireworks AI"
+description = "Fireworks AI hosted models through an OpenAI-compatible API."
+provider_type = "official"
+country = "United States"
+website = "https://fireworks.ai"
+kind = "openai-compatible"
+base_url = "https://api.fireworks.ai/inference/v1"
+api_key_env = "FIREWORKS_API_KEY"
+default_model = "accounts/fireworks/models/llama-v3p1-8b-instruct"
+enabled = false

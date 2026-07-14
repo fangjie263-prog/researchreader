@@ -1,0 +1,34 @@
+# ==========================================
+# ResearchReader Global Settings
+# ==========================================
+
+# ---------- AI ----------
+
+default_provider = "deepseek"
+
+# Optional.
+# If omitted, use the provider's configured default_model.
+# Only specify this when intentionally overriding.
+# default_model_override = ""
+
+# ---------- Translation ----------
+
+target_language = "Chinese"
+
+# ---------- Runtime ----------
+
+concurrency = 4
+retry_count = 3
+timeout = 300
+
+# ---------- Output ----------
+
+output_directory = "./output"
+
+# ---------- Cache ----------
+
+enable_cache = true
+
+# ---------- Logging ----------
+
+log_level = "INFO"

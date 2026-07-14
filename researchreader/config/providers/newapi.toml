@@ -1,0 +1,11 @@
+id = "newapi"
+display_name = "NewAPI"
+description = "Self-hosted NewAPI OpenAI-compatible gateway."
+provider_type = "gateway"
+country = "Custom"
+website = "https://github.com/Calcium-Ion/new-api"
+kind = "openai-compatible"
+base_url = "http://localhost:3000/v1"
+api_key_env = "NEWAPI_API_KEY"
+default_model = "auto"
+enabled = false

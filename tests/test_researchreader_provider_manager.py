@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from researchreader.researchreader.cli.main import main
-from researchreader.researchreader.config import ProviderConfig, load_provider_configs
+from researchreader.researchreader.config import ProviderConfig, load_provider_catalog, load_provider_configs
 from researchreader.researchreader.models import ModelInfo, ModelRegistry, load_model_registry
 from researchreader.researchreader.provider_manager import ProviderManager
 from researchreader.researchreader.providers import (
@@ -38,6 +38,203 @@ model = "gpt-test"
         self.assertEqual(len(configs), 1)
         self.assertEqual(configs[0].name, "openai")
         self.assertEqual(configs[0].model, "gpt-test")
+
+    def test_load_provider_configs_from_array_tables(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "deepseek"
+display_name = "DeepSeek"
+kind = "openai-compatible"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+default_model = "deepseek-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            configs = load_provider_configs(config_path)
+
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0].name, "deepseek")
+        self.assertEqual(configs[0].model, "deepseek-chat")
+
+    def test_custom_provider_loading(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "my-company"
+display_name = "My Company LLM"
+kind = "openai-compatible"
+base_url = "https://llm.example.com/v1"
+api_key_env = "MY_COMPANY_API_KEY"
+default_model = "company-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            configs = load_provider_configs(config_path)
+
+        self.assertEqual(configs[0].name, "my-company")
+        self.assertEqual(configs[0].display_name, "My Company LLM")
+
+    def test_provider_catalog_directory_scanning(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            catalog_dir = Path(temp_dir)
+            (catalog_dir / "one.toml").write_text(
+                """
+id = "one"
+display_name = "One"
+kind = "openai-compatible"
+base_url = "https://one.example.com/v1"
+api_key_env = "ONE_API_KEY"
+default_model = "one-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+            (catalog_dir / "two.toml").write_text(
+                """
+id = "two"
+display_name = "Two"
+kind = "openai-compatible"
+base_url = "https://two.example.com/v1"
+api_key_env = "TWO_API_KEY"
+default_model = "two-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            configs = load_provider_catalog(catalog_dir)
+
+        self.assertEqual([config.name for config in configs], ["one", "two"])
+
+    def test_provider_metadata_loading(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            catalog_dir = Path(temp_dir)
+            (catalog_dir / "gateway.toml").write_text(
+                """
+id = "gateway"
+display_name = "Gateway"
+description = "Private gateway"
+provider_type = "gateway"
+country = "Custom"
+website = "https://gateway.example.com"
+kind = "openai-compatible"
+base_url = "https://gateway.example.com/v1"
+api_key_env = "GATEWAY_API_KEY"
+default_model = "auto"
+enabled = false
+""".strip(),
+                encoding="utf-8",
+            )
+
+            config = load_provider_catalog(catalog_dir)[0]
+
+        self.assertEqual(config.provider_type, "gateway")
+        self.assertEqual(config.description, "Private gateway")
+        self.assertEqual(config.country, "Custom")
+        self.assertEqual(config.website, "https://gateway.example.com")
+
+    def test_duplicate_provider_detection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            catalog_dir = Path(temp_dir)
+            (catalog_dir / "one.toml").write_text(
+                """
+id = "duplicate"
+display_name = "One"
+kind = "openai-compatible"
+base_url = "https://one.example.com/v1"
+api_key_env = "ONE_API_KEY"
+default_model = "one-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+            (catalog_dir / "two.toml").write_text(
+                """
+id = "duplicate"
+display_name = "Two"
+kind = "openai-compatible"
+base_url = "https://two.example.com/v1"
+api_key_env = "TWO_API_KEY"
+default_model = "two-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "duplicated provider id"):
+                load_provider_catalog(catalog_dir)
+
+    def test_invalid_provider_configuration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "broken"
+display_name = "Broken"
+kind = "unsupported-kind"
+base_url = ""
+api_key_env = "BROKEN_API_KEY"
+default_model = ""
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "unsupported provider kind"):
+                load_provider_configs(config_path)
+
+    def test_disabled_provider_is_skipped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "disabled"
+display_name = "Disabled"
+kind = "openai-compatible"
+base_url = "https://disabled.example.com/v1"
+api_key_env = "DISABLED_API_KEY"
+default_model = "disabled-chat"
+enabled = false
+""".strip(),
+                encoding="utf-8",
+            )
+
+            configs = load_provider_configs(config_path)
+
+        self.assertEqual(configs, [])
+
+    def test_disabled_provider_is_present_in_catalog(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            catalog_dir = Path(temp_dir)
+            (catalog_dir / "disabled.toml").write_text(
+                """
+id = "disabled"
+display_name = "Disabled"
+kind = "openai-compatible"
+base_url = "https://disabled.example.com/v1"
+api_key_env = "DISABLED_API_KEY"
+default_model = "disabled-chat"
+enabled = false
+""".strip(),
+                encoding="utf-8",
+            )
+
+            configs = load_provider_catalog(catalog_dir)
+
+        self.assertEqual(len(configs), 1)
+        self.assertFalse(configs[0].enabled)
 
     def test_validation_reports_missing_api_key(self):
         config = ProviderConfig(
@@ -72,6 +269,26 @@ class TestProviderManager(unittest.TestCase):
         self.assertFalse(summary.configured)
         self.assertIn("missing base_url", summary.configuration_errors)
         self.assertIn("missing model", summary.configuration_errors)
+
+    def test_unregistered_custom_model_is_not_a_configuration_error(self):
+        manager = ProviderManager(
+            [
+                ProviderConfig(
+                    name="my-company",
+                    display_name="My Company LLM",
+                    kind="openai-compatible",
+                    base_url="https://llm.example.com/v1",
+                    model="company-chat",
+                    api_key_env="MY_COMPANY_API_KEY",
+                    api_key="test-key",
+                )
+            ]
+        )
+
+        summary = manager.summaries()[0]
+
+        self.assertTrue(summary.configured)
+        self.assertEqual(summary.configuration_errors, ())
 
 
 class TestModelRegistry(unittest.TestCase):
@@ -162,7 +379,7 @@ class TestOpenAICompatibleProvider(unittest.TestCase):
         provider = OpenAICompatibleProvider(_configured_provider())
 
         with (
-            patch.object(provider, "list_models", return_value=["gpt-4o-mini"]),
+            patch.object(provider, "list_models", side_effect=AssertionError("Models API should not be required")),
             patch.object(
                 provider,
                 "_measure_response_timings",
@@ -177,6 +394,34 @@ class TestOpenAICompatibleProvider(unittest.TestCase):
         self.assertTrue(result.model_available)
         self.assertEqual(result.first_token_latency_ms, 12.5)
         self.assertEqual(result.total_response_time_ms, 25.0)
+
+    def test_completion_success_marks_model_available_when_models_api_is_unreliable(self):
+        provider = OpenAICompatibleProvider(
+            ProviderConfig(
+                name="deepseek",
+                display_name="DeepSeek",
+                kind="openai-compatible",
+                base_url="https://api.deepseek.com/v1",
+                model="deepseek-chat",
+                api_key_env="DEEPSEEK_API_KEY",
+                api_key="test-key",
+            )
+        )
+
+        with (
+            patch.object(provider, "list_models", side_effect=AssertionError("Models API should not be required")),
+            patch.object(
+                provider,
+                "_measure_response_timings",
+                return_value=_FakeTimings(first_token_latency_ms=100.0, total_response_time_ms=200.0),
+            ),
+        ):
+            result = provider.test()
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.connectivity_ok)
+        self.assertTrue(result.model_available)
+        self.assertEqual(result.errors, ())
 
     def test_model_capabilities_are_exposed_by_registry(self):
         registry = _model_registry()
@@ -213,6 +458,80 @@ api_key = "test-key"
         self.assertIn("gpt-4o-mini", output.getvalue())
         self.assertIn("Models by provider", output.getvalue())
 
+    def test_models_command_includes_custom_provider(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "my-company"
+display_name = "My Company LLM"
+kind = "openai-compatible"
+base_url = "https://llm.example.com/v1"
+api_key_env = "MY_COMPANY_API_KEY"
+default_model = "company-chat"
+api_key = "test-key"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                exit_code = main(["--config", str(config_path), "--models"])
+
+        printed = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("My Company LLM", printed)
+        self.assertIn("company-chat", printed)
+
+    def test_models_command_groups_gateway_and_disabled_provider(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            catalog_dir = Path(temp_dir)
+            (catalog_dir / "gateway.toml").write_text(
+                """
+id = "gateway"
+display_name = "Gateway"
+provider_type = "gateway"
+kind = "openai-compatible"
+base_url = "https://gateway.example.com/v1"
+api_key_env = "GATEWAY_API_KEY"
+default_model = "auto"
+enabled = false
+""".strip(),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                exit_code = main(["--config", str(catalog_dir), "--models"])
+
+        printed = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Gateway Providers", printed)
+        self.assertIn("Gateway", printed)
+        self.assertIn("status: disabled", printed)
+
+    def test_test_command_skips_disabled_provider(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            catalog_dir = Path(temp_dir)
+            (catalog_dir / "disabled.toml").write_text(
+                """
+id = "disabled"
+display_name = "Disabled"
+kind = "openai-compatible"
+base_url = "https://disabled.example.com/v1"
+api_key_env = "DISABLED_API_KEY"
+default_model = "disabled-chat"
+enabled = false
+""".strip(),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                exit_code = main(["--config", str(catalog_dir), "--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Health: 0 passed, 0 failed, 0 total", output.getvalue())
+
     def test_test_command_prints_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "providers.toml"
@@ -247,6 +566,62 @@ api_key = "test-key"
         self.assertIn("First Token: 3.8s", printed)
         self.assertIn("Total Time: 4.6s", printed)
         self.assertIn("Streaming: Yes", printed)
+
+    def test_test_command_uses_custom_openai_compatible_provider(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "my-company"
+display_name = "My Company LLM"
+kind = "openai-compatible"
+base_url = "https://llm.example.com/v1"
+api_key_env = "MY_COMPANY_API_KEY"
+default_model = "company-chat"
+api_key = "test-key"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with (
+                patch("sys.stdout", output),
+                patch.object(
+                    OpenAICompatibleProvider,
+                    "_measure_response_timings",
+                    return_value=_FakeTimings(first_token_latency_ms=100.0, total_response_time_ms=200.0),
+                ),
+            ):
+                exit_code = main(["--config", str(config_path), "--test"])
+
+        printed = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("My Company LLM", printed)
+        self.assertIn("Status: PASS", printed)
+
+    def test_cli_reports_invalid_configuration_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "providers.toml"
+            config_path.write_text(
+                """
+[[providers]]
+id = "broken"
+display_name = "Broken"
+kind = "unsupported-kind"
+base_url = "https://broken.example.com/v1"
+api_key_env = "BROKEN_API_KEY"
+default_model = "broken-chat"
+enabled = true
+""".strip(),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                exit_code = main(["--config", str(config_path), "--models"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Configuration error:", output.getvalue())
 
 
 class _FakeResponse:

@@ -1,0 +1,11 @@
+id = "hcnsec"
+display_name = "HCNSEC AI Gateway"
+description = "HCNSEC OpenAI-compatible AI gateway."
+provider_type = "gateway"
+country = "China"
+website = "https://api.hcnsec.cn"
+kind = "openai-compatible"
+base_url = "https://api.hcnsec.cn"
+api_key_env = "HCNSEC_API_KEY"
+default_model = "auto"
+enabled = false

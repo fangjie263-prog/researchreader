@@ -12,6 +12,11 @@ class ProviderConfig:
     base_url: str
     model: str
     api_key_env: str
+    description: str = ""
+    provider_type: str = "custom"
+    country: str = ""
+    website: str = ""
+    enabled: bool = True
     api_key: str | None = None
 
     @property
@@ -22,6 +27,10 @@ class ProviderConfig:
 
     def validate(self) -> list[str]:
         errors: list[str] = []
+        if not self.name:
+            errors.append("missing provider id")
+        if not self.display_name:
+            errors.append("missing display_name")
         if not self.kind:
             errors.append("missing provider kind")
         if self.kind != "openai-compatible":

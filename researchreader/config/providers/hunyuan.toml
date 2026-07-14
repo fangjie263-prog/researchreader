@@ -1,0 +1,11 @@
+id = "hunyuan"
+display_name = "Tencent Hunyuan"
+description = "Tencent Hunyuan models through an OpenAI-compatible endpoint."
+provider_type = "official"
+country = "China"
+website = "https://cloud.tencent.com/product/hunyuan"
+kind = "openai-compatible"
+base_url = "https://api.hunyuan.cloud.tencent.com/v1"
+api_key_env = "HUNYUAN_API_KEY"
+default_model = "hunyuan-turbos-latest"
+enabled = false

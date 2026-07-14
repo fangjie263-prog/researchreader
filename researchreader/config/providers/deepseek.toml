@@ -1,0 +1,11 @@
+id = "deepseek"
+display_name = "DeepSeek"
+description = "DeepSeek chat models exposed through an OpenAI-compatible API."
+provider_type = "official"
+country = "China"
+website = "https://www.deepseek.com"
+kind = "openai-compatible"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+default_model = "deepseek-chat"
+enabled = true

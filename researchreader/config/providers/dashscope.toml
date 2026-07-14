@@ -1,0 +1,11 @@
+id = "dashscope"
+display_name = "Alibaba DashScope"
+description = "Alibaba Cloud DashScope models through an OpenAI-compatible endpoint."
+provider_type = "official"
+country = "China"
+website = "https://dashscope.aliyun.com"
+kind = "openai-compatible"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "DASHSCOPE_API_KEY"
+default_model = "qwen-plus"
+enabled = false

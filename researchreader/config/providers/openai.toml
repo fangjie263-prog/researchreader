@@ -1,0 +1,11 @@
+id = "openai"
+display_name = "OpenAI"
+description = "OpenAI platform models exposed through the OpenAI-compatible API."
+provider_type = "official"
+country = "United States"
+website = "https://openai.com"
+kind = "openai-compatible"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-4o-mini"
+enabled = true
