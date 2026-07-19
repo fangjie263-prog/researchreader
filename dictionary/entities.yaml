@@ -1,0 +1,87 @@
+canonical: NVIDIA
+aliases:
+- 英伟达
+- Nvidia
+- NVIDIA Corporation
+categories:
+- company
+- semiconductor
+enabled: true
+priority: 1
+metadata:
+  ticker: NVDA
+  sector: Technology
+related: []
+---
+canonical: Tesla
+aliases:
+- 特斯拉
+- Tesla Inc
+- Tesla Inc.
+categories:
+- company
+- automotive
+enabled: true
+priority: 1
+metadata:
+  ticker: TSLA
+  sector: Automotive
+related: []
+---
+canonical: Elon Musk
+aliases:
+- 埃隆马斯克
+- Elon
+- Musk
+categories:
+- person
+- executive
+enabled: true
+priority: 1
+metadata:
+  role: CEO
+  companies:
+  - Tesla
+  - SpaceX
+related:
+- Tesla
+---
+canonical: Artificial Intelligence
+aliases:
+- AI
+- 人工智能
+- 人工智能技术
+categories:
+- topic
+- technology
+enabled: true
+priority: 2
+metadata: {}
+related: []
+---
+canonical: OpenAI
+aliases:
+- 开放人工智能公司
+- Open AI
+categories:
+- company
+- ai
+enabled: true
+priority: 1
+metadata:
+  ticker: private
+  sector: Technology
+related: []
+---
+canonical: China
+aliases:
+- 中国
+- CN
+- PRC
+categories:
+- country
+- geography
+enabled: true
+priority: 3
+metadata: {}
+related: []
