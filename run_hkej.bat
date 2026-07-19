@@ -40,14 +40,20 @@ python work\hkej_scraper.py -n %pages%
 
 echo.
 echo ============================================
+echo Converting latest news to HTML...
+echo ============================================
+python hkej_to_html.py --latest
+
+echo.
+echo ============================================
 echo Finished!
 echo Output folder:
 echo.
-echo work\outputs\
+echo work\outputs\ and output\
 echo ============================================
 echo.
 
-explorer work\outputs
+explorer output
 
 echo.
 pause
