@@ -74,7 +74,77 @@ def read_epub(epub_path: str) -> tuple[str, dict[str, bytes], list[dict]]:
             article = _parse_article(art_div, base_dir, image_lookup, image_map)
             articles.append(article)
 
-    return book_title, image_map, articles
+    return book_title, image_map, merge_articles(articles)
+
+
+def _same_article_field(left: str, right: str) -> bool:
+    """Return whether two non-empty article metadata fields identify a match."""
+    if not left or not right:
+        return False
+    if left == "Untitled" or right == "Untitled":
+        return False
+    return left.strip() == right.strip()
+
+
+def should_merge_articles(previous: dict, current: dict) -> bool:
+    """Return whether two consecutive parsed fragments belong to one article."""
+    return any(
+        _same_article_field(previous.get(field, ""), current.get(field, ""))
+        for field in ("title", "byline", "subtitle")
+    )
+
+
+def deduplicate_paragraphs(paragraphs: list[str]) -> list[str]:
+    """Remove repeated paragraphs while preserving their first-seen order."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for paragraph in paragraphs:
+        key = paragraph.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(paragraph)
+    return result
+
+
+def _deduplicate_images(images: list[dict]) -> list[dict]:
+    """Keep the first occurrence of each image in article order."""
+    result: list[dict] = []
+    seen: set[str] = set()
+    for image in images:
+        key = image.get("src", "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(image)
+    return result
+
+
+def merge_articles(articles: list[dict]) -> list[dict]:
+    """Merge consecutive EPUB fragments that represent the same article."""
+    if not articles:
+        return []
+
+    merged: list[dict] = []
+    for article in articles:
+        if not merged or not should_merge_articles(merged[-1], article):
+            merged.append(article)
+            continue
+
+        target = merged[-1]
+        target["paragraphs"] = deduplicate_paragraphs(
+            target.get("paragraphs", []) + article.get("paragraphs", [])
+        )
+        target["images"] = _deduplicate_images(
+            target.get("images", []) + article.get("images", [])
+        )
+
+        # Keep any metadata that was only present in the later fragment.
+        for field in ("title", "subtitle", "annotation", "byline"):
+            if not target.get(field) and article.get(field):
+                target[field] = article[field]
+
+    return merged
 
 
 def _resolve_image(src: str, base_dir: str) -> str | None:
@@ -135,38 +205,48 @@ def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: d
             raw = el.get_text(strip=True)
             result["byline"] = re.sub(r"^by\s+", "", raw, flags=re.IGNORECASE)
 
-    # --- Body: walk children of art_div ---
-    for child in art_div.children:
-        if not isinstance(child, Tag):
-            continue
+    # --- Body: recursively walk nested div/section wrappers ---
+    seen_images: set[str] = set()
 
-        cls = child.get("class", [])
+    def visit(container: Tag) -> None:
+        for child in container.children:
+            if not isinstance(child, Tag):
+                continue
 
-        # Skip structural wrappers
-        if any(c in cls for c in ("art-cnt", "art-header", "legal-header", "art-title-area")):
-            continue
+            cls = child.get("class", [])
 
-        # Regular paragraph
-        if child.name == "p":
-            text = child.get_text(strip=True)
-            if text:
-                result["paragraphs"].append(text)
+            # Skip structural/header areas wherever they occur in the tree.
+            if any(c in cls for c in ("art-cnt", "art-header", "legal-header", "art-title-area")):
+                continue
 
-        # Image container
-        elif "img-art" in cls:
-            img_tag = child.find("img")
-            caption_tag = child.find("span", class_="img-text")
-            if img_tag:
-                src = img_tag.get("src", "")
-                alt = img_tag.get("alt", "")
-                if src:
-                    resolved = _resolve_image(src, base_dir)
-                    if resolved:
-                        safe = _save_image(resolved, image_lookup, image_map)
-                        if safe:
-                            result["images"].append({"src": safe, "alt": alt})
-                            if caption_tag:
-                                result["paragraphs"].append(f"[Image: {caption_tag.get_text(strip=True)}]")
+            if child.name == "p":
+                text = child.get_text(strip=True)
+                if text:
+                    result["paragraphs"].append(text)
+                continue
+
+            if "img-art" in cls:
+                img_tag = child.find("img")
+                caption_tag = child.find("span", class_="img-text")
+                if img_tag:
+                    src = img_tag.get("src", "")
+                    alt = img_tag.get("alt", "")
+                    if src:
+                        resolved = _resolve_image(src, base_dir)
+                        if resolved and resolved not in seen_images:
+                            seen_images.add(resolved)
+                            safe = _save_image(resolved, image_lookup, image_map)
+                            if safe:
+                                result["images"].append({"src": safe, "alt": alt})
+                                if caption_tag:
+                                    result["paragraphs"].append(
+                                        f"[Image: {caption_tag.get_text(strip=True)}]"
+                                    )
+                continue
+
+            visit(child)
+
+    visit(art_div)
 
     # Fallback: use title as identifier
     if not result["title"]:
