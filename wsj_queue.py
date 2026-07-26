@@ -12,6 +12,7 @@ from pathlib import Path
 import wsj_reader
 from ai_config import AIServiceConfig
 from ai_service import AIService, AIServiceError
+from topic_manager import topic_context
 
 
 ROOT = Path(__file__).resolve().parent
@@ -19,6 +20,8 @@ BOOKS_DIR = ROOT / "books"
 OUTPUT_ROOT = ROOT / "output"
 DELAY_SECONDS = float(os.environ.get("WSJ_API_DELAY", "3"))
 RETRIES = int(os.environ.get("WSJ_API_RETRIES", "3"))
+ANALYZE = os.environ.get("WSJ_ANALYZE", "0") != "0"
+TRANSLATE = os.environ.get("WSJ_TRANSLATE", "0") != "0"
 
 
 def _safe_name(path: Path) -> str:
@@ -81,6 +84,19 @@ def _translate_with_retry(service: AIService, article: dict, book_name: str, ind
     raise AIServiceError(f"第 {index} 篇翻译失败: {last_error}")
 
 
+def _analyze_article(service: AIService, article: dict) -> dict | None:
+    parts = [article.get("title", ""), article.get("subtitle", ""), article.get("annotation", "")]
+    parts.extend(article.get("paragraphs", [])[:10])
+    text = "\n\n".join(part for part in parts if part)
+    if not text.strip():
+        return None
+    try:
+        return json.loads(service.summarize(text, topic_context=topic_context()))
+    except (AIServiceError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        print(f"    AI analysis skipped: {exc}")
+        return None
+
+
 def process_book(book: Path, service: AIService | None) -> bool:
     book_output = OUTPUT_ROOT / _safe_name(book)
     book_output.mkdir(parents=True, exist_ok=True)
@@ -100,7 +116,7 @@ def process_book(book: Path, service: AIService | None) -> bool:
     progress_file = _progress_path(book_output)
     progress = _load_progress(progress_file, book, len(articles))
     saved = progress.setdefault("translations", {})
-    if service is None:
+    if service is None or not TRANSLATE:
         print("  API 未配置，保留原文并生成 HTML")
     else:
         for index, article in enumerate(articles):
@@ -113,6 +129,20 @@ def process_book(book: Path, service: AIService | None) -> bool:
             article.update({k: translated.get(k, article.get(k, "")) for k in ("title", "subtitle", "annotation", "byline", "paragraphs")})
             saved[key] = {k: article[k] for k in ("title", "subtitle", "annotation", "byline", "paragraphs")}
             _save_progress(progress_file, progress)
+            time.sleep(DELAY_SECONDS)
+
+    if service is not None and ANALYZE:
+        for index, article in enumerate(articles):
+            key = str(index)
+            if saved.get(key, {}).get("analysis"):
+                article["analysis"] = saved[key]["analysis"]
+                continue
+            print(f"  Analyzing {index + 1}/{len(articles)}: {article.get('title', '')[:40]}")
+            analysis = _analyze_article(service, article)
+            if analysis is not None:
+                article["analysis"] = analysis
+                saved.setdefault(key, {})["analysis"] = analysis
+                _save_progress(progress_file, progress)
             time.sleep(DELAY_SECONDS)
 
     for article in articles:
@@ -132,7 +162,7 @@ def main() -> None:
         print(f"ERROR: books 文件夹没有 EPUB: {BOOKS_DIR}")
         return
     config = AIServiceConfig.from_env()
-    service = AIService(config) if config.is_active and os.environ.get("WSJ_TRANSLATE", "1") != "0" else None
+    service = AIService(config) if config.is_active else None
     print(f"发现 {len(books)} 本 EPUB，将按文件名顺序逐本处理")
     completed = failed = 0
     for number, book in enumerate(books, 1):

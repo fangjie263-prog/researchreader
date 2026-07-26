@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+DEFAULT_SETTINGS_PATH = ROOT / "ai_settings.json"
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,14 +43,36 @@ class AIServiceConfig:
 
     @classmethod
     def from_env(cls) -> "AIServiceConfig":
-        """Build config from environment variables.
+        """Load local settings first, then let environment variables override them."""
+        settings_path = Path(os.environ.get("AI_SETTINGS_PATH", DEFAULT_SETTINGS_PATH))
+        data: dict = {}
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+        def value(name: str, fallback: str) -> str:
+            override = os.environ.get(name)
+            return override if override else fallback
 
-        This is the *only* place in the project that reads env vars.
-        """
         return cls(
-            enabled=True,
-            api_key=os.environ.get("AI_API_KEY", ""),
-            base_url=os.environ.get("AI_BASE_URL", ""),
-            model=os.environ.get("AI_MODEL", ""),
-            endpoint=os.environ.get("AI_ENDPOINT", "/chat/completions"),
+            enabled=os.environ.get("AI_ENABLED", str(data.get("enabled", True))).lower() not in {"0", "false", "no"},
+            api_key=value("AI_API_KEY", data.get("api_key", "")),
+            base_url=value("AI_BASE_URL", data.get("base_url", "")),
+            model=value("AI_MODEL", data.get("model", "")),
+            endpoint=value("AI_ENDPOINT", data.get("endpoint", "/chat/completions")),
         )
+
+    def save(self, path: Path | None = None) -> Path:
+        """Save local settings without exposing them to source control."""
+        target = path or DEFAULT_SETTINGS_PATH
+        target.write_text(
+            json.dumps({
+                "enabled": self.enabled,
+                "api_key": self.api_key,
+                "base_url": self.base_url,
+                "model": self.model,
+                "endpoint": self.endpoint,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return target

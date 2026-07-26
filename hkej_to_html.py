@@ -79,10 +79,53 @@ def _parse_json(path: Path) -> tuple[dict, list[dict]]:
     return metadata, articles
 
 
+def _parse_txt_utf8(path: Path) -> tuple[dict, list[dict]]:
+    """Parse the UTF-8 Chinese labels written by the PowerShell scraper."""
+    text = _read_text(path).replace("\r\n", "\n")
+    header, _, body = text.partition("\n\n")
+    metadata: dict[str, str] = {"source": "https://www.hkej.com/instantnews"}
+    for line in header.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            metadata[key.strip()] = value.strip()
+
+    labels = {
+        "title": "\u6807\u9898",
+        "url": "\u94fe\u63a5",
+        "category": "\u5206\u7c7b",
+        "content": "\u6b63\u6587",
+        "status": "\u72b6\u6001",
+    }
+    articles: list[dict] = []
+    for block in re.split(r"(?m)^={10,}\s*$", body):
+        fields: dict[str, str] = {}
+        content_lines: list[str] = []
+        in_content = False
+        for line in block.strip().splitlines():
+            if line.startswith(labels["content"] + ":"):
+                in_content = True
+                remainder = line.split(":", 1)[1].strip()
+                if remainder:
+                    content_lines.append(remainder)
+            elif not in_content and any(line.startswith(labels[key] + ":") for key in ("title", "url", "category", "status")):
+                key, value = line.split(":", 1)
+                fields[key.strip()] = value.strip()
+            elif in_content:
+                content_lines.append(line)
+        if fields.get(labels["title"]):
+            articles.append({
+                "title": fields[labels["title"]],
+                "url": fields.get(labels["url"], ""),
+                "category": fields.get(labels["category"], ""),
+                "content": "\n".join(content_lines).strip() or fields.get(labels["status"], ""),
+            })
+    return metadata, articles
+
+
 def parse_input(path: Path) -> tuple[dict, list[dict]]:
     if path.suffix.lower() == ".json":
         return _parse_json(path)
-    return _parse_txt(path)
+    return _parse_txt_utf8(path)
 
 
 def _paragraphs(content: str) -> list[str]:
