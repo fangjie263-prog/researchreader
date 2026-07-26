@@ -1,5 +1,11 @@
 \# ResearchReader
 
+License: [MIT](LICENSE)
+
+The MIT license applies to this repository's original code. Third-party
+dependencies, downloaded publications, scraped content, API services, and
+model outputs remain subject to their own terms and licenses.
+
 
 
 A personal AI-powered news reader and scraper.
