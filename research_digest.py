@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import re
 from pathlib import Path
 
@@ -104,6 +105,31 @@ def build_report(results: list[dict]) -> tuple[str, str]:
     return "\n".join(md), html_text
 
 
+def build_json_records(results: list[dict]) -> list[dict]:
+    records: list[dict] = []
+    for index, item in enumerate(results, start=1):
+        records.append({
+            "article_id": f"article_{index:03d}",
+            "title": item.get("title", ""),
+            "priority": item.get("priority", 0),
+            "matched_topics": item.get("matched_topics", item.get("local_matches", [])),
+            "summary_zh": item.get("summary_zh", ""),
+            "summary_en": item.get("summary_en", ""),
+            "reason_zh": item.get("reason_zh", ""),
+            "reason_en": item.get("reason_en", ""),
+            "source_document": item.get("source", ""),
+        })
+    return records
+
+
+def write_json_report(path: Path, results: list[dict]) -> Path:
+    path.write_text(
+        json.dumps(build_json_records(results), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
+
+
 def run(root: Path = OUTPUT_ROOT) -> tuple[Path, Path, int]:
     config = AIServiceConfig.from_env()
     if not config.is_active:
@@ -123,8 +149,10 @@ def run(root: Path = OUTPUT_ROOT) -> tuple[Path, Path, int]:
     markdown, html_text = build_report(results)
     md_path = root / "reading_recommendations.md"
     html_path = root / "reading_recommendations.html"
+    json_path = root / "reading_recommendations.json"
     md_path.write_text(markdown, encoding="utf-8")
     html_path.write_text(html_text, encoding="utf-8")
+    write_json_report(json_path, results)
     return md_path, html_path, len(results)
 
 
@@ -138,6 +166,7 @@ def main() -> None:
     print(f"Recommended: {count}")
     print(f"Markdown: {md_path}")
     print(f"HTML: {html_path}")
+    print(f"JSON: {args.root / 'reading_recommendations.json'}")
 
 
 if __name__ == "__main__":

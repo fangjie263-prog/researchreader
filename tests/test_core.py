@@ -11,7 +11,10 @@ from hkej_to_html import _parse_json, build_html, parse_input
 from pdf_queue import _to_markdown
 from pdf_reader import _deduplicate_and_join_pages, _render_html
 from topic_manager import topic_context, save_topics
-from research_digest import _matches_topics, build_report
+from research_digest import _matches_topics, build_json_records, build_report, write_json_report
+from article_locator import ArticleLocator, ArticleNotFound
+from article_extractor import ArticleContent, ArticleExtractionError, ArticleExtractor
+from article_translator import ArticleTranslationError, ArticleTranslator
 
 
 class PdfCoreTests(unittest.TestCase):
@@ -215,6 +218,206 @@ class AiConfigTests(unittest.TestCase):
         self.assertIn("中文短摘要", markdown)
         self.assertIn("Short English summary", html)
 
+
+    def test_digest_json_records_have_complete_sequential_ids(self):
+        results = [{
+            "title": "First", "source": "first.md", "priority": 5,
+            "matched_topics": ["AI"], "summary_zh": "一", "summary_en": "One",
+            "reason_zh": "理由一", "reason_en": "Reason one",
+        }, {
+            "title": "Second", "source": "second.md", "priority": 3,
+            "matched_topics": ["chips"], "summary_zh": "二", "summary_en": "Two",
+            "reason_zh": "理由二", "reason_en": "Reason two",
+        }]
+        required = {
+            "article_id", "title", "priority", "matched_topics", "summary_zh",
+            "summary_en", "reason_zh", "reason_en", "source_document",
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            path = write_json_report(Path(temp) / "reading_recommendations.json", results)
+            records = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual([r["article_id"] for r in records], ["article_001", "article_002"])
+        self.assertEqual(len({r["article_id"] for r in records}), 2)
+        self.assertTrue(all(required <= set(r) for r in records))
+
+    def test_digest_markdown_is_unchanged_when_article_id_is_added(self):
+        result = {
+            "title": "AI chips", "source": "article.md", "priority": 4,
+            "matched_topics": ["AI"], "reason_zh": "相关", "reason_en": "Relevant",
+            "summary_zh": "摘要", "summary_en": "Summary",
+        }
+        before = build_report([result])[0]
+        after = build_report([{**result, "article_id": "article_001"}])[0]
+        self.assertEqual(before, after)
+
+
+class ArticleLocatorTests(unittest.TestCase):
+    def _write_json(self, temp: str, records: list[dict]) -> Path:
+        path = Path(temp) / "reading_recommendations.json"
+        path.write_text(json.dumps(records), encoding="utf-8")
+        return path
+
+    def _record(self, article_id: str) -> dict:
+        return {
+            "article_id": article_id,
+            "title": f"Title {article_id}",
+            "priority": 5,
+            "matched_topics": ["AI"],
+            "summary_zh": "摘要",
+            "summary_en": "Summary",
+            "reason_zh": "理由",
+            "reason_en": "Reason",
+            "source_document": "articles.md",
+        }
+
+    def test_locator_returns_requested_article(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write_json(temp, [self._record("article_001")])
+            article = ArticleLocator(path).get("article_001")
+        self.assertEqual(article["title"], "Title article_001")
+
+    def test_locator_raises_article_not_found(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write_json(temp, [self._record("article_001")])
+            with self.assertRaisesRegex(ArticleNotFound, "article_999"):
+                ArticleLocator(path).get("article_999")
+
+    def test_locator_supports_multiple_articles(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write_json(temp, [self._record("article_001"), self._record("article_002")])
+            locator = ArticleLocator(path)
+            self.assertEqual(locator.get("article_001")["article_id"], "article_001")
+            self.assertEqual(locator.get("article_002")["article_id"], "article_002")
+
+    def test_locator_rejects_record_with_missing_fields(self):
+        record = self._record("article_001")
+        del record["source_document"]
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write_json(temp, [record])
+            with self.assertRaisesRegex(ValueError, "source_document"):
+                ArticleLocator(path)
+
+
+class ArticleExtractorTests(unittest.TestCase):
+    def _record(self, article_id: str = "article_001") -> dict:
+        return {
+            "article_id": article_id, "title": "Target article", "priority": 5,
+            "matched_topics": ["AI"], "summary_zh": "摘要", "summary_en": "Summary",
+            "reason_zh": "理由", "reason_en": "Reason", "source_document": "source.md",
+        }
+
+    def _setup(self, temp: str, record: dict, source: str) -> ArticleExtractor:
+        root = Path(temp) / "output"
+        root.mkdir()
+        (root / "source.md").write_text(source, encoding="utf-8")
+        json_path = Path(temp) / "recommendations.json"
+        json_path.write_text(json.dumps([record]), encoding="utf-8")
+        return ArticleExtractor(ArticleLocator(json_path), root)
+
+    def test_extractor_returns_complete_markdown_article(self):
+        with tempfile.TemporaryDirectory() as temp:
+            extractor = self._setup(temp, self._record(), "# File\n## Target article\nFirst paragraph.\n\nSecond paragraph.\n## Other\nOther text.")
+            content = extractor.extract("article_001")
+        self.assertIsInstance(content, ArticleContent)
+        self.assertEqual(content.title, "Target article")
+        self.assertIn("First paragraph.", content.content)
+        self.assertIn("Second paragraph.", content.content)
+        self.assertNotIn("Other text.", content.content)
+
+    def test_extractor_reports_missing_body(self):
+        with tempfile.TemporaryDirectory() as temp:
+            extractor = self._setup(temp, self._record(), "# Other\nOther text.")
+            with self.assertRaisesRegex(ArticleExtractionError, "body"):
+                extractor.extract("article_001")
+
+    def test_extractor_reports_missing_markdown_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "output"
+            root.mkdir()
+            record = self._record()
+            json_path = Path(temp) / "recommendations.json"
+            json_path.write_text(json.dumps([record]), encoding="utf-8")
+            with self.assertRaisesRegex(ArticleExtractionError, "source"):
+                ArticleExtractor(ArticleLocator(json_path), root).extract("article_001")
+
+
+    def test_extractor_propagates_locator_not_found(self):
+        with tempfile.TemporaryDirectory() as temp:
+            extractor = self._setup(temp, self._record(), "## Target article\nBody")
+            with self.assertRaisesRegex(ArticleNotFound, "article_999"):
+                extractor.extract("article_999")
+
+    def test_extractor_reports_empty_body(self):
+        with tempfile.TemporaryDirectory() as temp:
+            extractor = self._setup(temp, self._record(), "## Target article\n---\n")
+            with self.assertRaisesRegex(ArticleExtractionError, "empty"):
+                extractor.extract("article_001")
+
+
+class ArticleTranslatorTests(unittest.TestCase):
+    class FakeService:
+        def translate_article(self, article):
+            return {"title": "中文标题", "paragraphs": [f"翻译：{p}" for p in article["paragraphs"]]}
+
+    class FailingService:
+        def translate_article(self, article):
+            raise RuntimeError("provider unavailable")
+
+    def _make_translator(self, temp: str, service=None, article_ids=None):
+        article_ids = article_ids or ["article_001"]
+        source_root = Path(temp) / "output"
+        source_root.mkdir()
+        records = []
+        for article_id in article_ids:
+            source_name = f"{article_id}.md"
+            (source_root / source_name).write_text(f"## Title {article_id}\nOriginal body", encoding="utf-8")
+            records.append({
+                "article_id": article_id, "title": f"Title {article_id}", "priority": 5,
+                "matched_topics": ["AI"], "summary_zh": "摘要", "summary_en": "Summary",
+                "reason_zh": "理由", "reason_en": "Reason", "source_document": source_name,
+            })
+        json_path = Path(temp) / "recommendations.json"
+        json_path.write_text(json.dumps(records), encoding="utf-8")
+        locator = ArticleLocator(json_path)
+        return ArticleTranslator(
+            locator=locator,
+            extractor=ArticleExtractor(locator, source_root),
+            service=service or self.FakeService(),
+            output_root=source_root,
+        )
+
+    def test_translator_generates_original_and_chinese_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = self._make_translator(temp).translate("article_001")
+            output = result.output_directory
+            self.assertIn("Original body", (output / "article.md").read_text(encoding="utf-8"))
+            self.assertIn("翻译：Original body", (output / "article_zh.md").read_text(encoding="utf-8"))
+
+    def test_translator_handles_multiple_articles_in_order(self):
+        with tempfile.TemporaryDirectory() as temp:
+            translator = self._make_translator(temp, article_ids=["article_001", "article_002"])
+            results = [translator.translate(article_id) for article_id in ["article_001", "article_002"]]
+        self.assertEqual([result.article.article_id for result in results], ["article_001", "article_002"])
+
+    def test_translator_reports_missing_body(self):
+        with tempfile.TemporaryDirectory() as temp:
+            translator = self._make_translator(temp)
+            source = Path(temp) / "output" / "article_001.md"
+            source.write_text("## Other\nOther body", encoding="utf-8")
+            with self.assertRaises(ArticleExtractionError):
+                translator.translate("article_001")
+
+    def test_translator_reports_pipeline_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            translator = self._make_translator(temp, service=self.FailingService())
+            with self.assertRaisesRegex(ArticleTranslationError, "Translation failed"):
+                translator.translate("article_001")
+
+    def test_translator_creates_output_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = self._make_translator(temp).translate("article_001")
+            self.assertTrue((result.output_directory / "article.md").is_file())
+            self.assertTrue((result.output_directory / "article_zh.md").is_file())
 
 if __name__ == "__main__":
     unittest.main()
