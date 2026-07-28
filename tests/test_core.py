@@ -11,6 +11,7 @@ from hkej_to_html import _parse_json, build_html, parse_input
 from pdf_queue import _to_markdown
 from pdf_reader import _deduplicate_and_join_pages, _render_html
 from topic_manager import topic_context, save_topics
+from topic_filter import TopicFilter
 from research_digest import _matches_topics, build_json_records, build_report, write_json_report
 from article_locator import ArticleLocator, ArticleNotFound
 from article_extractor import ArticleContent, ArticleExtractionError, ArticleExtractor
@@ -418,6 +419,267 @@ class ArticleTranslatorTests(unittest.TestCase):
             result = self._make_translator(temp).translate("article_001")
             self.assertTrue((result.output_directory / "article.md").is_file())
             self.assertTrue((result.output_directory / "article_zh.md").is_file())
+
+
+class TopicFilterTests(unittest.TestCase):
+    def test_topic_filter_scores_and_writes_candidate_reports(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            topics_path = temp_path / "topics.json"
+            topics_path.write_text(json.dumps([{
+                "name_zh": "人工智能",
+                "keywords_zh": ["OpenAI"],
+                "keywords_en": ["GPU", "NVIDIA"],
+                "related_topics": ["CUDA"],
+            }], ensure_ascii=False), encoding="utf-8")
+            articles = [
+                {
+                    "title": "OpenAI GPU race",
+                    "subtitle": "NVIDIA CUDA stack",
+                    "paragraphs": ["OpenAI and NVIDIA are working on GPU tools."],
+                    "source": "story.md",
+                },
+                {
+                    "title": "Sports recap",
+                    "paragraphs": ["Golf and travel coverage."],
+                    "source": "sports.md",
+                },
+            ]
+            filter_ = TopicFilter(topics_path=topics_path, threshold=15)
+            candidates = filter_.filter_articles(articles)
+            json_path, md_path = filter_.write_reports(candidates, temp_path)
+            self.assertEqual(len(candidates), 1)
+            self.assertGreater(candidates[0]["local_score"], 15)
+            self.assertIn("OpenAI", candidates[0]["matched_keywords"])
+            self.assertTrue(json_path.is_file())
+            self.assertTrue(md_path.is_file())
+            self.assertIn("**OpenAI**", md_path.read_text(encoding="utf-8"))
+
+    def test_research_digest_uses_topic_filter_before_ai(self):
+        from research_digest import run
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "input.md").write_text("# AI story\nRelevant body", encoding="utf-8")
+            fake_candidates = [{
+                "title": "AI story",
+                "text": "Relevant body",
+                "source": "input.md",
+                "local_score": 25,
+                "matched_keywords": ["AI"],
+                "matched_topics": ["人工智能"],
+                "preview": "Relevant body",
+            }]
+            with patch.dict(os.environ, {"AI_API_KEY": "key", "AI_BASE_URL": "https://example.test", "AI_MODEL": "model"}, clear=False), patch(
+                "research_digest.collect_candidates", return_value=[{"title": "AI story", "text": "Relevant body", "source": "input.md"}]
+            ), patch("research_digest.TopicFilter.filter_articles", return_value=fake_candidates), patch(
+                "research_digest.TopicFilter.write_reports"
+            ) as write_reports, patch("research_digest.TopicFilter.print_stats"), patch("research_digest.AIService.screen_article", return_value={
+                "recommend": True,
+                "priority": 5,
+                "matched_topics": ["人工智能"],
+                "reason_zh": "相关",
+                "reason_en": "Relevant",
+                "summary_zh": "中文摘要",
+                "summary_en": "English summary",
+            }) as screen_article:
+                md_path, _, count = run(root)
+            self.assertEqual(count, 1)
+            self.assertEqual(screen_article.call_count, 1)
+            self.assertTrue(write_reports.called)
+            self.assertTrue(md_path.is_file())
+
+
+class TopicManagerV2Tests(unittest.TestCase):
+    class FakeAliasService:
+        def refresh_topic_aliases(self, topics, current_aliases):
+            return {
+                "aliases": {
+                    "人工智能": {
+                        "keywords": ["生成式AI", "AI Factory", "market"],
+                        "companies": ["OpenAI"],
+                        "products": ["GB300"],
+                        "technologies": ["Inference Scaling"],
+                        "abbreviations": ["GPU"],
+                        "updated_at": "2026-07-28",
+                        "source": "AI Refresh",
+                    }
+                }
+            }
+
+    def test_refresh_generates_candidate_and_diff_without_overwriting_aliases(self):
+        from topic_manager import generate_alias_candidates
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            topics_path = root / "topics.json"
+            aliases_path = root / "aliases.json"
+            candidate_path = root / "aliases_candidate.json"
+            diff_path = root / "aliases.diff.md"
+            topics_path.write_text(json.dumps(["人工智能"], ensure_ascii=False), encoding="utf-8")
+            aliases_path.write_text(json.dumps({
+                "knowledge_version": "2026-01-01",
+                "generator": "Test",
+                "generator_model": "test-model",
+                "generated_at": "2026-01-01T00:00:00",
+                "schema_version": 1,
+                "topics": {
+                    "人工智能": {
+                        "keywords": ["OpenCog"],
+                        "companies": ["OpenAI"],
+                        "products": [],
+                        "technologies": [],
+                        "abbreviations": [],
+                        "updated_at": "2026-01-01",
+                        "source": "AI Refresh",
+                    }
+                }
+            }, ensure_ascii=False), encoding="utf-8")
+            candidates = generate_alias_candidates(
+                self.FakeAliasService(),
+                topics_path=topics_path,
+                aliases_path=aliases_path,
+                candidate_path=candidate_path,
+                diff_path=diff_path,
+            )
+            current = json.loads(aliases_path.read_text(encoding="utf-8"))
+            candidate_db = json.loads(candidate_path.read_text(encoding="utf-8"))
+            self.assertIn("GB300", candidates["人工智能"]["products"])
+            self.assertNotIn("market", candidates["人工智能"]["keywords"])
+            self.assertIn("OpenCog", current["topics"]["人工智能"]["keywords"])
+            self.assertEqual(candidate_db["schema_version"], 1)
+            self.assertIn("topics", candidate_db)
+            self.assertTrue(candidate_path.is_file())
+            diff = diff_path.read_text(encoding="utf-8")
+            self.assertIn("GB300", diff)
+            self.assertIn("Reason", diff)
+            self.assertIn("OpenCog", diff)
+
+    def test_apply_alias_candidates_accepts_all_or_selected_or_rejects(self):
+        from topic_manager import apply_alias_candidates
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            aliases_path = root / "aliases.json"
+            candidate_path = root / "aliases_candidate.json"
+            aliases_path.write_text(json.dumps({"AI": {"keywords": ["Old"]}}, ensure_ascii=False), encoding="utf-8")
+            candidate_path.write_text(json.dumps({
+                "AI": {"keywords": ["New"]},
+                "Chips": {"companies": ["NVIDIA"]},
+            }, ensure_ascii=False), encoding="utf-8")
+            with patch("topic_manager.HISTORY_DIR", root / "history"):
+                rejected = apply_alias_candidates("reject", candidate_path, aliases_path)
+                self.assertEqual(rejected["AI"]["keywords"], ["Old"])
+                selected = apply_alias_candidates("selected", candidate_path, aliases_path, ["Chips"])
+                self.assertEqual(selected["AI"]["keywords"], ["Old"])
+                self.assertEqual(selected["Chips"]["companies"], ["NVIDIA"])
+                accepted = apply_alias_candidates("all", candidate_path, aliases_path)
+            self.assertEqual(accepted["AI"]["keywords"], ["New"])
+
+    def test_topic_filter_loads_aliases_from_config_shape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            topics_path = root / "topics.json"
+            aliases_path = root / "aliases.json"
+            topics_path.write_text(json.dumps(["人工智能"], ensure_ascii=False), encoding="utf-8")
+            aliases_path.write_text(json.dumps({
+                "knowledge_version": "2026-07-28",
+                "generator": "Test",
+                "generator_model": "test-model",
+                "generated_at": "2026-07-28T00:00:00",
+                "schema_version": 1,
+                "topics": {
+                    "人工智能": {
+                        "keywords": ["生成式AI"],
+                        "companies": ["OpenAI"],
+                        "products": [],
+                        "technologies": [],
+                        "abbreviations": [],
+                        "updated_at": "2026-07-28",
+                        "source": "AI Refresh",
+                    }
+                }
+            }, ensure_ascii=False), encoding="utf-8")
+            candidates = TopicFilter(topics_path=topics_path, aliases_path=aliases_path).filter_articles([
+                {"title": "OpenAI launches new inference tools", "paragraphs": ["Body"]}
+            ])
+        self.assertEqual(len(candidates), 1)
+        self.assertIn("OpenAI", candidates[0]["matched_keywords"])
+
+    def test_topic_filter_keeps_legacy_keyword_topics_compatible(self):
+        with tempfile.TemporaryDirectory() as temp:
+            topics_path = Path(temp) / "topics.json"
+            aliases_path = Path(temp) / "aliases.json"
+            topics_path.write_text(json.dumps([{
+                "name_zh": "Legacy AI",
+                "keywords_en": ["OpenAI"],
+                "keywords_zh": [],
+                "related_topics": [],
+            }], ensure_ascii=False), encoding="utf-8")
+            aliases_path.write_text("{}", encoding="utf-8")
+            candidates = TopicFilter(topics_path=topics_path, aliases_path=aliases_path).filter_articles([
+                {"title": "OpenAI news", "paragraphs": ["Body"]}
+            ])
+        self.assertEqual(len(candidates), 1)
+
+    def test_alias_database_metadata_and_legacy_loading(self):
+        from topic_manager import load_alias_database, load_aliases
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "aliases.json"
+            path.write_text(json.dumps({"AI": {"keywords_en": ["OpenAI"]}}, ensure_ascii=False), encoding="utf-8")
+            database = load_alias_database(path)
+            aliases = load_aliases(path)
+        self.assertEqual(database["schema_version"], 1)
+        self.assertIn("knowledge_version", database)
+        self.assertEqual(aliases["AI"]["keywords"], ["OpenAI"])
+
+    def test_alias_history_is_created_before_overwrite(self):
+        from topic_manager import apply_alias_candidates
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            aliases_path = root / "aliases.json"
+            candidate_path = root / "aliases_candidate.json"
+            history_dir = root / "history"
+            aliases_path.write_text(json.dumps({"AI": {"keywords": ["Old"]}}, ensure_ascii=False), encoding="utf-8")
+            candidate_path.write_text(json.dumps({"AI": {"keywords": ["New"]}}, ensure_ascii=False), encoding="utf-8")
+            with patch("topic_manager.HISTORY_DIR", history_dir):
+                apply_alias_candidates("all", candidate_path, aliases_path)
+            history_files = list(history_dir.glob("aliases_*.json"))
+            self.assertEqual(len(history_files), 1)
+            self.assertIn("Old", history_files[0].read_text(encoding="utf-8"))
+
+    def test_alias_validation_reports_warnings_without_crashing(self):
+        from topic_manager import validate_alias_database
+
+        warnings = validate_alias_database({
+            "topics": {
+                "AI": {
+                    "keywords": ["OpenAI", "OpenAI"],
+                    "companies": [],
+                    "products": [],
+                    "abbreviations": ["GPU", "GPU"],
+                    "unknown": ["x"],
+                }
+            }
+        })
+        self.assertTrue(any("duplicate" in warning for warning in warnings))
+        self.assertTrue(any("empty category" in warning for warning in warnings))
+        self.assertTrue(any("unknown category" in warning for warning in warnings))
+
+    def test_doctor_interface_writes_reserved_health_report(self):
+        from topic_manager import doctor
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            aliases_path = root / "aliases.json"
+            report_path = root / "knowledge_health_report.md"
+            aliases_path.write_text(json.dumps({"AI": {"keywords": ["OpenAI"]}}, ensure_ascii=False), encoding="utf-8")
+            with patch("topic_manager.ALIASES_PATH", aliases_path), patch("topic_manager.KNOWLEDGE_HEALTH_REPORT_PATH", report_path), patch("topic_manager.CONFIG_DIR", root):
+                result = doctor()
+            self.assertEqual(result, report_path)
+            self.assertIn("Knowledge Health Report", report_path.read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
     unittest.main()

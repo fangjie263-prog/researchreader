@@ -11,6 +11,7 @@ from pathlib import Path
 from ai_config import AIServiceConfig
 from ai_service import AIService, AIServiceError
 from topic_manager import load_topics, topic_context
+from topic_filter import TopicFilter
 
 
 ROOT = Path(__file__).resolve().parent
@@ -60,20 +61,17 @@ def _matches_topics(article: dict, terms: list[str]) -> list[str]:
 
 
 def collect_candidates(root: Path = OUTPUT_ROOT) -> list[dict]:
-    terms = _topic_terms()
-    if not terms:
-        return []
     candidates: list[dict] = []
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in {".md", ".html"}:
             continue
         if path.name in {"reading_recommendations.md", "reading_recommendations.html"}:
             continue
+        if path.name in {"candidate_articles.md", "candidate_articles.json"}:
+            continue
         for article in _read_articles(path):
-            matches = _matches_topics(article, terms)
-            if matches:
-                article.update({"source": str(path.relative_to(root)), "local_matches": matches})
-                candidates.append(article)
+            article.update({"source": str(path.relative_to(root))})
+            candidates.append(article)
     return candidates
 
 
@@ -134,7 +132,11 @@ def run(root: Path = OUTPUT_ROOT) -> tuple[Path, Path, int]:
     config = AIServiceConfig.from_env()
     if not config.is_active:
         raise RuntimeError("AI is not configured. Run 'python ai_setup.py setup'.")
-    candidates = collect_candidates(root)
+    articles = collect_candidates(root)
+    topic_filter = TopicFilter()
+    candidates = topic_filter.filter_articles(articles)
+    topic_filter.write_reports(candidates, root)
+    topic_filter.print_stats()
     service = AIService(config)
     results: list[dict] = []
     for candidate in candidates[:30]:

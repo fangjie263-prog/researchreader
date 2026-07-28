@@ -7,6 +7,7 @@ from ebooklib import epub, ITEM_IMAGE, ITEM_DOCUMENT
 
 from ai_model import AIConfig
 from ai_processor import analyze_articles
+from topic_filter import TopicFilter
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -367,11 +368,16 @@ def main() -> None:
     print(f"  Articles   : {len(articles)}")
     print(f"  Images     : {len(image_map)}")
 
+    topic_filter = TopicFilter()
+    candidates = topic_filter.filter_articles(articles)
+    topic_filter.write_reports(candidates, OUTPUT_DIR)
+    topic_filter.print_stats()
+
     # Step 2b: AI analysis
     print('[2b/3] Running AI analysis...')
     config = AIConfig(enabled=True)
-    articles = analyze_articles(articles, config)
-    print(f'  Analysis complete for {len(articles)} articles')
+    analyze_articles(candidates, config)
+    print(f'  Analysis complete for {len(candidates)} candidate articles')
 
     # Step 3: Save output
     print("[3/3] Saving to output/...")

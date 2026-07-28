@@ -112,6 +112,23 @@ class AIService:
         )
         return self._chat_json(system, json.dumps({"topics": topics}, ensure_ascii=False), max_tokens=1800)
 
+    def refresh_topic_aliases(self, topics: list[str], current_aliases: dict[str, Any]) -> dict[str, Any]:
+        system = (
+            "You are maintaining an investment research topic dictionary. Expand each topic with "
+            "separate categories: keywords, companies, products, technologies, and abbreviations. "
+            "keywords are general searchable terms. companies are public or investment-relevant "
+            "company names. products are commercial products. technologies are technical concepts. "
+            "abbreviations are short names. Include Chinese aliases, English aliases, synonyms, and "
+            "emerging terminology in the most appropriate category. Never merge everything into "
+            "keywords. Only include terms currently widely used. Remove obsolete terms. Avoid generic "
+            "words, common English words, and very ambiguous words. Prefer official names, industry "
+            "terminology, public company names, technology names, and product names. Return valid JSON "
+            "only. The JSON must be an object with key aliases. aliases maps each topic to an object "
+            "with keywords, companies, products, technologies, abbreviations, updated_at, and source."
+        )
+        user = json.dumps({"topics": topics, "current_aliases": current_aliases}, ensure_ascii=False)
+        return self._chat_json(system, user, max_tokens=3000)
+
     def screen_article(self, title: str, excerpt: str, topic_context: str) -> dict[str, Any]:
         """Screen a topic-matched article before spending tokens on a summary."""
         system = (

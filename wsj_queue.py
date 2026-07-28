@@ -12,6 +12,7 @@ from pathlib import Path
 import wsj_reader
 from ai_config import AIServiceConfig
 from ai_service import AIService, AIServiceError
+from topic_filter import TopicFilter
 from topic_manager import topic_context
 
 
@@ -25,7 +26,7 @@ TRANSLATE = os.environ.get("WSJ_TRANSLATE", "0") != "0"
 
 
 def _safe_name(path: Path) -> str:
-    name = re.sub(r"[^0-9A-Za-z一-龥._-]+", "_", path.stem).strip("._")
+    name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", path.stem).strip("._")
     return name or "book"
 
 
@@ -39,9 +40,9 @@ def validate_epub(path: Path) -> str | None:
         with zipfile.ZipFile(path) as archive:
             bad = archive.testzip()
             if bad:
-                return f"CRC 校验失败: {bad}"
+                return f"CRC check failed: {bad}"
     except (OSError, zipfile.BadZipFile) as exc:
-        return f"EPUB/ZIP 无法读取: {exc}"
+        return f"EPUB/ZIP unreadable: {exc}"
     return None
 
 
@@ -73,15 +74,15 @@ def _translate_with_retry(service: AIService, article: dict, book_name: str, ind
         try:
             translated = service.translate_article(article)
             if not isinstance(translated.get("paragraphs"), list):
-                raise AIServiceError("paragraphs 不是数组")
+                raise AIServiceError("paragraphs is not an array")
             return translated
         except (AIServiceError, OSError, ValueError) as exc:
             last_error = exc
             if attempt < RETRIES:
                 wait = max(DELAY_SECONDS, 2 ** (attempt - 1) * 5)
-                print(f"    {book_name} 第 {index} 篇失败，{wait:.0f} 秒后重试 ({attempt}/{RETRIES})")
+                print(f"    {book_name} article {index} failed, retrying in {wait:.0f}s ({attempt}/{RETRIES})")
                 time.sleep(wait)
-    raise AIServiceError(f"第 {index} 篇翻译失败: {last_error}")
+    raise AIServiceError(f"article {index} translation failed: {last_error}")
 
 
 def _analyze_article(service: AIService, article: dict) -> dict | None:
@@ -109,35 +110,43 @@ def process_book(book: Path, service: AIService | None) -> bool:
     try:
         title, image_map, articles = wsj_reader.read_epub(str(book))
     except Exception as exc:
-        print(f"  SKIP: EPUB 解析失败: {exc}")
-        (book_output / "ERROR.txt").write_text(f"EPUB 解析失败: {exc}\n", encoding="utf-8")
+        print(f"  SKIP: EPUB parse failed: {exc}")
+        (book_output / "ERROR.txt").write_text(f"EPUB parse failed: {exc}\n", encoding="utf-8")
         return False
+
+    topic_filter = TopicFilter()
+    candidates = topic_filter.filter_articles(articles)
+    topic_filter.write_reports(candidates, book_output)
+    topic_filter.print_stats()
 
     progress_file = _progress_path(book_output)
     progress = _load_progress(progress_file, book, len(articles))
     saved = progress.setdefault("translations", {})
+
     if service is None or not TRANSLATE:
-        print("  API 未配置，保留原文并生成 HTML")
+        print("  API not configured; keeping original text and generating HTML")
     else:
-        for index, article in enumerate(articles):
-            key = str(index)
+        for article in candidates:
+            source_index = int(article.get("source_index", 0))
+            key = str(source_index)
             if key in saved:
                 article.update(saved[key])
                 continue
-            print(f"  翻译 {index + 1}/{len(articles)}: {article.get('title', '')[:40]}")
-            translated = _translate_with_retry(service, article, book.name, index + 1)
+            print(f"  Translating {source_index + 1}/{len(articles)}: {article.get('title', '')[:40]}")
+            translated = _translate_with_retry(service, article, book.name, source_index + 1)
             article.update({k: translated.get(k, article.get(k, "")) for k in ("title", "subtitle", "annotation", "byline", "paragraphs")})
             saved[key] = {k: article[k] for k in ("title", "subtitle", "annotation", "byline", "paragraphs")}
             _save_progress(progress_file, progress)
             time.sleep(DELAY_SECONDS)
 
     if service is not None and ANALYZE:
-        for index, article in enumerate(articles):
-            key = str(index)
+        for article in candidates:
+            source_index = int(article.get("source_index", 0))
+            key = str(source_index)
             if saved.get(key, {}).get("analysis"):
                 article["analysis"] = saved[key]["analysis"]
                 continue
-            print(f"  Analyzing {index + 1}/{len(articles)}: {article.get('title', '')[:40]}")
+            print(f"  Analyzing {source_index + 1}/{len(articles)}: {article.get('title', '')[:40]}")
             analysis = _analyze_article(service, article)
             if analysis is not None:
                 article["analysis"] = analysis
@@ -159,11 +168,11 @@ def process_book(book: Path, service: AIService | None) -> bool:
 def main() -> None:
     books = find_books()
     if not books:
-        print(f"ERROR: books 文件夹没有 EPUB: {BOOKS_DIR}")
+        print(f"ERROR: books folder has no EPUB files: {BOOKS_DIR}")
         return
     config = AIServiceConfig.from_env()
     service = AIService(config) if config.is_active else None
-    print(f"发现 {len(books)} 本 EPUB，将按文件名顺序逐本处理")
+    print(f"Found {len(books)} EPUB file(s); processing in filename order")
     completed = failed = 0
     for number, book in enumerate(books, 1):
         print(f"\n[{number}/{len(books)}] {book.name}")
@@ -171,7 +180,7 @@ def main() -> None:
             completed += 1
         else:
             failed += 1
-    print(f"\n队列完成：成功 {completed} 本，失败/跳过 {failed} 本")
+    print(f"\nQueue complete: {completed} succeeded, {failed} failed/skipped")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import html
 import re
 from pathlib import Path
 
-from pdf_reader import _render_html, read_pdf
+from pdf_reader import _render_html, filter_candidate_articles, read_pdf
 
 
 ROOT = Path(__file__).resolve().parent
@@ -97,6 +97,8 @@ def process_pdf(pdf: Path) -> bool:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         title, articles = read_pdf(pdf)
+        candidates = filter_candidate_articles(articles, output_dir)
+        print(f"  Local filter selected {len(candidates)} page article(s)")
         _save_output(pdf, output_dir, title, articles)
         print(f"  Pages: {len(articles)}")
         return True

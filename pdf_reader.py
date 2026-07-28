@@ -7,6 +7,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from topic_filter import TopicFilter
+
 
 def _require_pdfplumber():
     try:
@@ -133,6 +135,15 @@ def read_pdf(pdf_path: str | Path) -> tuple[str, list[dict]]:
     if not articles:
         raise ValueError("PDF contains no pages")
     return title, articles
+
+
+def filter_candidate_articles(articles: list[dict], output_root: Path | str | None = None, threshold: int = 15) -> list[dict]:
+    """Apply the shared local topic filter to PDF-derived articles."""
+    topic_filter = TopicFilter(threshold=threshold)
+    candidates = topic_filter.filter_articles(articles)
+    if output_root is not None:
+        topic_filter.write_reports(candidates, output_root)
+    return candidates
 
 
 def _paragraphs_from_blocks(page) -> list[str]:
