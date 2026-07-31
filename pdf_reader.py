@@ -7,6 +7,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from article_merger import ArticleMerger
 from topic_filter import TopicFilter
 
 
@@ -134,7 +135,7 @@ def read_pdf(pdf_path: str | Path) -> tuple[str, list[dict]]:
         )
     if not articles:
         raise ValueError("PDF contains no pages")
-    return title, articles
+    return title, ArticleMerger().merge(articles)
 
 
 def filter_candidate_articles(articles: list[dict], output_root: Path | str | None = None, threshold: int = 15) -> list[dict]:

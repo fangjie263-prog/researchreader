@@ -16,6 +16,11 @@ from research_digest import _matches_topics, build_json_records, build_report, w
 from article_locator import ArticleLocator, ArticleNotFound
 from article_extractor import ArticleContent, ArticleExtractionError, ArticleExtractor
 from article_translator import ArticleTranslationError, ArticleTranslator
+from article_merger import ArticleMerger
+from continuation import ContinuationLink, ContinuationMerger, ContinuationResolver
+from parser_debug import ParserDebugger
+from paragraph_trace import ParagraphTracer
+from wsj_reader import _register_dom_visit
 
 
 class PdfCoreTests(unittest.TestCase):
@@ -53,6 +58,297 @@ class WsjCoreTests(unittest.TestCase):
         ])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["paragraphs"], ["One", "Two", "Three"])
+
+
+class ArticleMergerTests(unittest.TestCase):
+    def test_merges_partial_paragraph_overlap(self):
+        merged = ArticleMerger().merge([
+            {"title": "Story", "paragraphs": ["ABCDE"]},
+            {"title": "Story", "paragraphs": ["CDEFG"]},
+        ], emit_log=False)
+        self.assertEqual(merged[0]["paragraphs"], ["ABCDEFG"])
+
+
+class DuplicateReportTests(unittest.TestCase):
+    def test_reports_normalized_duplicate_positions(self):
+        from duplicate_report import build_report
+
+        report = build_report([{
+            "article_id": "article_001",
+            "title": "Story",
+            "paragraphs": ["First", " Same  text ", "Other", "Same text"],
+        }])
+        self.assertEqual(report[0]["occurrences"], [1, 3])
+        self.assertEqual(report[0]["duplicate_text"], " Same  text ")
+
+    def test_omits_articles_without_duplicates(self):
+        from duplicate_report import build_report
+
+        self.assertEqual(build_report([{"title": "Clean", "paragraphs": ["A", "B"]}]), [])
+
+    def test_removes_identical_paragraph_after_merge(self):
+        merged = ArticleMerger().merge([
+            {"title": "Story", "paragraphs": ["ABCDE"]},
+            {"title": "Story", "paragraphs": ["ABCDE"]},
+        ], emit_log=False)
+        self.assertEqual(merged[0]["paragraphs"], ["ABCDE"])
+
+    def test_keeps_non_overlapping_paragraphs(self):
+        merged = ArticleMerger().merge([
+            {"title": "Story", "paragraphs": ["ABCDE"]},
+            {"title": "Story", "paragraphs": ["FGHI"]},
+        ], emit_log=False)
+        self.assertEqual(merged[0]["paragraphs"], ["ABCDE", "FGHI"])
+
+    def test_remerging_same_article_does_not_add_text(self):
+        first = ArticleMerger().merge([
+            {"title": "Story", "paragraphs": ["ABCDE"]},
+            {"title": "Story", "paragraphs": ["CDEFG"]},
+        ], emit_log=False)[0]
+        merged = ArticleMerger().merge([first, {"title": "Story", "paragraphs": ["CDEFG"]}], emit_log=False)
+        self.assertEqual(merged[0]["paragraphs"], ["ABCDEFG"])
+
+    def test_merges_articles_with_identical_titles(self):
+        merged = ArticleMerger().merge([
+            {
+                "title": "Apple Earnings",
+                "subtitle": "First",
+                "author": "Alice",
+                "source": "a.md",
+                "paragraphs": ["First paragraph."],
+                "images": [{"src": "one.png"}],
+                "_page": 1,
+            },
+            {
+                "title": "Apple Earnings",
+                "subtitle": "Second",
+                "author": "Bob",
+                "source": "b.md",
+                "paragraphs": ["Second paragraph."],
+                "images": [{"src": "two.png"}],
+                "_page": 2,
+            },
+        ], emit_log=False)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["paragraphs"], ["First paragraph.", "Second paragraph."])
+        self.assertEqual(merged[0]["images"], [{"src": "one.png"}, {"src": "two.png"}])
+        self.assertEqual(merged[0]["subtitle"], "First")
+        self.assertEqual(merged[0]["author"], "Alice")
+        self.assertEqual(merged[0]["source"], "a.md")
+        self.assertEqual(merged[0]["_page"], 1)
+
+    def test_keeps_articles_with_different_titles_separate(self):
+        merged = ArticleMerger().merge([
+            {"title": "Apple", "paragraphs": ["One"], "images": []},
+            {"title": "Amazon", "paragraphs": ["Two"], "images": []},
+        ], emit_log=False)
+        self.assertEqual(len(merged), 2)
+
+    def test_merges_case_insensitive_titles(self):
+        merged = ArticleMerger().merge([
+            {"title": "Apple", "paragraphs": ["One"], "images": []},
+            {"title": "apple", "paragraphs": ["Two"], "images": []},
+        ], emit_log=False)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["paragraphs"], ["One", "Two"])
+
+    def test_merges_titles_with_surrounding_spaces(self):
+        merged = ArticleMerger().merge([
+            {"title": " Apple ", "paragraphs": ["One"], "images": []},
+            {"title": "Apple", "paragraphs": ["Two"], "images": []},
+        ], emit_log=False)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["paragraphs"], ["One", "Two"])
+
+
+class ContinuationResolverTests(unittest.TestCase):
+    def test_detects_continued_on_marker(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "subtitle": "", "paragraphs": ["Continued on A7"], "page_reference": "A1"},
+            {"article_id": "article_002", "title": "B", "subtitle": "", "paragraphs": [], "page_reference": "A7"},
+        ]
+        links = ContinuationResolver().resolve(articles, emit_log=False)
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].source_article, "article_001")
+        self.assertEqual(links[0].target_article, "article_002")
+        self.assertEqual(links[0].page_reference, "A7")
+
+    def test_detects_case_insensitive_marker(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "subtitle": "", "paragraphs": ["continued on a7"], "page_reference": "A1"},
+            {"article_id": "article_002", "title": "B", "subtitle": "", "paragraphs": [], "page_reference": "A7"},
+        ]
+        links = ContinuationResolver().resolve(articles, emit_log=False)
+        self.assertEqual(len(links), 1)
+
+    def test_detects_continued_from_page_marker(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "subtitle": "", "paragraphs": ["Continued from Page C3"], "page_reference": "C1"},
+            {"article_id": "article_002", "title": "B", "subtitle": "", "paragraphs": [], "page_reference": "C3"},
+        ]
+        links = ContinuationResolver().resolve(articles, emit_log=False)
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].page_reference, "C3")
+
+    def test_detects_see_page_marker(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "subtitle": "", "paragraphs": ["See Page B5"], "page_reference": "B1"},
+            {"article_id": "article_002", "title": "B", "subtitle": "", "paragraphs": [], "page_reference": "B5"},
+        ]
+        links = ContinuationResolver().resolve(articles, emit_log=False)
+        self.assertEqual(len(links), 1)
+
+    def test_returns_empty_when_no_marker_exists(self):
+        links = ContinuationResolver().resolve([
+            {"article_id": "article_001", "title": "A", "subtitle": "", "paragraphs": ["Hello"], "page_reference": "A1"},
+        ], emit_log=False)
+        self.assertEqual(links, [])
+
+    def test_ignores_missing_target_page(self):
+        links = ContinuationResolver().resolve([
+            {"article_id": "article_001", "title": "A", "subtitle": "", "paragraphs": ["Continued on A7"], "page_reference": "A1"},
+        ], emit_log=False)
+        self.assertEqual(links, [])
+
+
+class ContinuationMergerTests(unittest.TestCase):
+    def test_merges_continuation_once(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "paragraphs": ["First"], "images": []},
+            {"article_id": "article_002", "title": "B", "paragraphs": ["Second"], "images": []},
+        ]
+        links = [ContinuationResolver().resolve([
+            {"article_id": "article_001", "title": "A", "paragraphs": ["Continued on A2"], "page_reference": "A1"},
+            {"article_id": "article_002", "title": "B", "paragraphs": [], "page_reference": "A2"},
+        ], emit_log=False)[0]]
+        ContinuationMerger().merge(articles, links, emit_log=False)
+        self.assertEqual(articles[1]["paragraphs"], ["Second", "First"])
+        self.assertIn("article_001", articles[1]["merged_article_ids"])
+        self.assertEqual(len(articles[1]["paragraphs"]), 2)
+
+    def test_second_merge_is_skipped(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "paragraphs": ["First"], "images": []},
+            {"article_id": "article_002", "title": "B", "paragraphs": ["Second"], "images": []},
+        ]
+        links = [ContinuationLink(source_article="article_001", target_article="article_002", page_reference="A2", marker="continued on A2")]
+        merger = ContinuationMerger()
+        merger.merge(articles, links, emit_log=False)
+        merger.merge(articles, links, emit_log=False)
+        self.assertEqual(articles[1]["paragraphs"], ["Second", "First"])
+        self.assertEqual(articles[1]["images"], [])
+
+    def test_different_continuations_merge_normally(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "paragraphs": ["One"], "images": []},
+            {"article_id": "article_002", "title": "B", "paragraphs": ["Two"], "images": []},
+            {"article_id": "article_003", "title": "C", "paragraphs": ["Three"], "images": []},
+        ]
+        links = [
+            ContinuationLink(source_article="article_001", target_article="article_002", page_reference="A2", marker="continued on A2"),
+            ContinuationLink(source_article="article_003", target_article="article_002", page_reference="A2", marker="continued on A2"),
+        ]
+        ContinuationMerger().merge(articles, links, emit_log=False)
+        self.assertEqual(articles[1]["paragraphs"], ["Two", "One", "Three"])
+
+    def test_images_are_not_duplicated_by_double_merge(self):
+        articles = [
+            {"article_id": "article_001", "title": "A", "paragraphs": ["One"], "images": [{"src": "x.png"}]},
+            {"article_id": "article_002", "title": "B", "paragraphs": ["Two"], "images": []},
+        ]
+        link = ContinuationLink(source_article="article_001", target_article="article_002", page_reference="A2", marker="continued on A2")
+        merger = ContinuationMerger()
+        merger.merge(articles, [link], emit_log=False)
+        merger.merge(articles, [link], emit_log=False)
+        self.assertEqual(articles[1]["images"], [{"src": "x.png"}])
+
+
+class ParserDebuggerTests(unittest.TestCase):
+    def test_reports_untitled_and_duplicate_and_empty_body(self):
+        debugger = ParserDebugger()
+        report = debugger.analyze([
+            {"title": "", "subtitle": "", "byline": "", "paragraphs": [], "images": []},
+            {"title": "Same", "subtitle": "", "byline": "", "paragraphs": ["Only one"], "images": []},
+            {"title": "Same", "subtitle": "", "byline": "", "paragraphs": ["More"], "images": []},
+        ])
+        self.assertEqual(report["summary"]["articles"], 3)
+        self.assertEqual(report["summary"]["untitled"], 1)
+        self.assertEqual(report["summary"]["duplicate_titles"], 1)
+        self.assertEqual(report["articles"][0]["warnings"], ["Article without title.", "Article without body."])
+
+    def test_writes_parser_debug_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "parser_debug.json"
+            report = ParserDebugger().dump([
+                {"title": "A", "subtitle": "", "byline": "", "paragraphs": ["Body"], "images": []}
+            ], target)
+            self.assertTrue(target.is_file())
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["summary"]["articles"], 1)
+            self.assertEqual(report["summary"]["articles"], 1)
+
+    def test_detects_possible_continuation(self):
+        report = ParserDebugger().analyze([
+            {"title": "A", "subtitle": "", "byline": "", "paragraphs": ["The meeting focused on AI chips."], "images": []},
+            {"title": "B", "subtitle": "", "byline": "", "paragraphs": ["AI chips remained the focus."], "images": []},
+        ])
+        self.assertGreaterEqual(report["summary"]["possible_continuations"], 1)
+
+
+class ParagraphTracerTests(unittest.TestCase):
+    def test_hash_deduplicates_repeated_paragraphs(self):
+        report = ParagraphTracer().trace([
+            {"title": "A", "paragraphs": ["Alpha", "Alpha", "Beta"], "images": []}
+        ])
+        article = report["articles"][0]
+        self.assertEqual(article["paragraphs"], 3)
+        self.assertEqual(article["unique"], 2)
+        self.assertEqual(report["summary"]["duplicate_paragraph_count"], 1)
+
+    def test_duplicate_indexes_are_reported(self):
+        report = ParagraphTracer().trace([
+            {"title": "A", "paragraphs": ["Alpha", "Beta", "Alpha"], "images": []}
+        ])
+        duplicates = report["articles"][0]["duplicates"]
+        self.assertEqual(duplicates[0]["first_index"], 1)
+        self.assertEqual(duplicates[0]["duplicate_indexes"], [3])
+
+    def test_writes_json_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "paragraph_trace.json"
+            report = ParagraphTracer().trace([
+                {"title": "A", "paragraphs": ["Alpha"], "images": []}
+            ], target)
+            self.assertTrue(target.is_file())
+            data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["summary"]["articles"], 1)
+        self.assertEqual(report["summary"]["articles"], 1)
+
+    def test_no_duplicate_article_is_reported_cleanly(self):
+        report = ParagraphTracer().trace([
+            {"title": "A", "paragraphs": ["Alpha", "Beta"], "images": []}
+        ])
+        self.assertEqual(report["summary"]["articles_with_duplicate_paragraphs"], 0)
+        self.assertEqual(report["articles"][0]["duplicates"], [])
+
+
+class DomGuardTests(unittest.TestCase):
+    def test_same_dom_node_is_detected_on_second_visit(self):
+        seen: set[int] = set()
+        node = object()
+        duplicate1, node_id1 = _register_dom_visit(seen, node)
+        duplicate2, node_id2 = _register_dom_visit(seen, node)
+        self.assertFalse(duplicate1)
+        self.assertTrue(duplicate2)
+        self.assertEqual(node_id1, node_id2)
+
+    def test_different_dom_nodes_are_allowed(self):
+        seen: set[int] = set()
+        first = object()
+        second = object()
+        duplicate1, _ = _register_dom_visit(seen, first)
+        duplicate2, _ = _register_dom_visit(seen, second)
+        self.assertFalse(duplicate1)
+        self.assertFalse(duplicate2)
 
 
 class HkejCoreTests(unittest.TestCase):

@@ -7,6 +7,8 @@ from ebooklib import epub, ITEM_IMAGE, ITEM_DOCUMENT
 
 from ai_model import AIConfig
 from ai_processor import analyze_articles
+from article_merger import ArticleMerger
+from continuation import ContinuationResolver
 from topic_filter import TopicFilter
 # ---------------------------------------------------------------------------
 # Paths
@@ -75,7 +77,7 @@ def read_epub(epub_path: str) -> tuple[str, dict[str, bytes], list[dict]]:
             article = _parse_article(art_div, base_dir, image_lookup, image_map)
             articles.append(article)
 
-    return book_title, image_map, merge_articles(articles)
+    return book_title, image_map, ArticleMerger().merge(articles)
 
 
 def _same_article_field(left: str, right: str) -> bool:
@@ -173,6 +175,25 @@ def _save_image(rel_path: str, image_lookup: dict[str, bytes], image_map: dict[s
     return safe
 
 
+def _dom_node_summary(node: Tag) -> dict:
+    """Return a lightweight description of the DOM node that produced text."""
+    classes = node.get("class", [])
+    if not isinstance(classes, list):
+        classes = [str(classes)]
+    return {
+        "tag": node.name,
+        "classes": classes,
+    }
+
+
+def _register_dom_visit(seen_nodes: set[int], node: Tag) -> tuple[bool, int]:
+    node_id = id(node)
+    duplicate = node_id in seen_nodes
+    if not duplicate:
+        seen_nodes.add(node_id)
+    return duplicate, node_id
+
+
 def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: dict) -> dict:
     """Parse a single <div class=\"art-cnt\"> into structured data."""
     result = {
@@ -182,6 +203,11 @@ def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: d
         "byline": "",
         "paragraphs": [],
         "images": [],
+        "_paragraph_sources": [],
+        "_dom_node_trace": {
+            "unique_dom_nodes": 0,
+            "duplicate_dom_node_visits": 0,
+        },
     }
 
     # --- Title area ---
@@ -208,8 +234,22 @@ def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: d
 
     # --- Body: recursively walk nested div/section wrappers ---
     seen_images: set[str] = set()
+    seen_nodes: set[int] = set()
+    duplicate_dom_node_visits = 0
+
+    def record_dom_visit(node: Tag) -> bool:
+        nonlocal duplicate_dom_node_visits
+        duplicate, _ = _register_dom_visit(seen_nodes, node)
+        if duplicate:
+            duplicate_dom_node_visits += 1
+            result["_dom_node_trace"]["duplicate_dom_node_visits"] = duplicate_dom_node_visits
+            return True
+        result["_dom_node_trace"]["unique_dom_nodes"] = len(seen_nodes)
+        return False
 
     def visit(container: Tag) -> None:
+        if record_dom_visit(container):
+            return
         for child in container.children:
             if not isinstance(child, Tag):
                 continue
@@ -224,6 +264,11 @@ def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: d
                 text = child.get_text(strip=True)
                 if text:
                     result["paragraphs"].append(text)
+                    result["_paragraph_sources"].append({
+                        "type": "paragraph",
+                        "text": text,
+                        "node": _dom_node_summary(child),
+                    })
                 continue
 
             if "img-art" in cls:
@@ -240,14 +285,20 @@ def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: d
                             if safe:
                                 result["images"].append({"src": safe, "alt": alt})
                                 if caption_tag:
-                                    result["paragraphs"].append(
-                                        f"[Image: {caption_tag.get_text(strip=True)}]"
-                                    )
+                                    caption = f"[Image: {caption_tag.get_text(strip=True)}]"
+                                    result["paragraphs"].append(caption)
+                                    result["_paragraph_sources"].append({
+                                        "type": "image_caption",
+                                        "text": caption,
+                                        "node": _dom_node_summary(caption_tag),
+                                    })
                 continue
 
             visit(child)
 
     visit(art_div)
+    result["_dom_node_trace"]["unique_dom_nodes"] = len(seen_nodes)
+    result["_dom_node_trace"]["duplicate_dom_node_visits"] = duplicate_dom_node_visits
 
     # Fallback: use title as identifier
     if not result["title"]:
@@ -368,6 +419,7 @@ def main() -> None:
     print(f"  Articles   : {len(articles)}")
     print(f"  Images     : {len(image_map)}")
 
+    ContinuationResolver().resolve(articles)
     topic_filter = TopicFilter()
     candidates = topic_filter.filter_articles(articles)
     topic_filter.write_reports(candidates, OUTPUT_DIR)

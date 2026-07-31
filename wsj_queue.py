@@ -12,6 +12,9 @@ from pathlib import Path
 import wsj_reader
 from ai_config import AIServiceConfig
 from ai_service import AIService, AIServiceError
+from continuation import ContinuationMerger, ContinuationResolver
+from paragraph_trace import ParagraphTracer
+from parser_debug import ParserDebugger
 from topic_filter import TopicFilter
 from topic_manager import topic_context
 
@@ -113,6 +116,18 @@ def process_book(book: Path, service: AIService | None) -> bool:
         print(f"  SKIP: EPUB parse failed: {exc}")
         (book_output / "ERROR.txt").write_text(f"EPUB parse failed: {exc}\n", encoding="utf-8")
         return False
+
+    ParserDebugger().dump(articles, book_output / "parser_debug.json")
+    paragraph_report = ParagraphTracer().trace(articles, book_output / "paragraph_trace.json")
+    ParagraphTracer().print_summary(paragraph_report)
+    dom_trace = [article.get("_dom_node_trace", {}) for article in articles]
+    unique_dom_nodes = sum(int(item.get("unique_dom_nodes", 0) or 0) for item in dom_trace)
+    duplicate_dom_node_visits = sum(int(item.get("duplicate_dom_node_visits", 0) or 0) for item in dom_trace)
+    print("DOM Node Trace")
+    print(f"Unique DOM nodes: {unique_dom_nodes}")
+    print(f"Duplicate DOM node visits: {duplicate_dom_node_visits}")
+    links = ContinuationResolver().resolve(articles)
+    ContinuationMerger().merge(articles, links)
 
     topic_filter = TopicFilter()
     candidates = topic_filter.filter_articles(articles)
