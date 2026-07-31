@@ -605,7 +605,7 @@ class ArticleExtractorTests(unittest.TestCase):
 
     def _setup(self, temp: str, record: dict, source: str) -> ArticleExtractor:
         root = Path(temp) / "output"
-        root.mkdir()
+        root.mkdir(exist_ok=True)
         (root / "source.md").write_text(source, encoding="utf-8")
         json_path = Path(temp) / "recommendations.json"
         json_path.write_text(json.dumps([record]), encoding="utf-8")
@@ -976,6 +976,73 @@ class TopicManagerV2Tests(unittest.TestCase):
                 result = doctor()
             self.assertEqual(result, report_path)
             self.assertIn("Knowledge Health Report", report_path.read_text(encoding="utf-8"))
+
+class ResearchPackageTests(unittest.TestCase):
+    def _translator(self, temp, failing=False):
+        root = Path(temp) / "output"
+        root.mkdir(exist_ok=True)
+        (root / "article_001.md").write_text("## Target\nOriginal body", encoding="utf-8")
+        records = [{"article_id": "article_001", "title": "Target", "priority": 5,
+                    "matched_topics": [], "summary_zh": "", "summary_en": "",
+                    "reason_zh": "", "reason_en": "", "source_document": "article_001.md"}]
+        rec = Path(temp) / "recommendations.json"
+        rec.write_text(json.dumps(records), encoding="utf-8")
+        class Service:
+            _config = None
+            def translate_article(self, article):
+                if failing:
+                    raise RuntimeError("provider unavailable")
+                return {"title": "目标", "paragraphs": ["中文正文"]}
+        locator = ArticleLocator(rec)
+        return ArticleTranslator(locator, ArticleExtractor(locator, root), Service(), root)
+
+    def test_creates_package_and_metadata(self):
+        from research_package import ResearchPackage
+        with tempfile.TemporaryDirectory() as temp:
+            path = ResearchPackage(self._translator(temp), Path(temp) / "output").create("article_001")
+            self.assertEqual({p.name for p in path.iterdir()}, {"article.md", "article_zh.md", "bilingual.md", "metadata.json"})
+            data = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["article_id"], "article_001")
+            self.assertIsNone(data["translation_provider"])
+            self.assertIn("## 中文翻译", (path / "bilingual.md").read_text(encoding="utf-8"))
+
+    def test_missing_article_and_translation_failure(self):
+        from research_package import ResearchPackage
+        with tempfile.TemporaryDirectory() as temp:
+            package = ResearchPackage(self._translator(temp), Path(temp) / "output")
+            with self.assertRaises(ArticleNotFound):
+                package.create("article_999")
+            with self.assertRaises(ArticleTranslationError):
+                ResearchPackage(self._translator(temp, failing=True), Path(temp) / "output").create("article_001")
+
+    def test_multiple_packages_continue_after_failure_and_write_summary(self):
+        from research_package import ResearchPackage
+        with tempfile.TemporaryDirectory() as temp:
+            package = ResearchPackage(self._translator(temp), Path(temp) / "output")
+            successes, failures = package.create_many(["article_001", "article_999"])
+            self.assertEqual([item["article_id"] for item in successes], ["article_001"])
+            self.assertEqual([item["article_id"] for item in failures], ["article_999"])
+            summary = (Path(temp) / "output" / "package" / "package_summary.md").read_text(encoding="utf-8")
+            self.assertIn("✓ article_001", summary)
+            self.assertIn("Count:\n1", summary)
+
+    def test_top_selects_priority_descending_and_keeps_json_order_on_ties(self):
+        from research_package import ResearchPackage
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "reading_recommendations.json"
+            path.write_text(json.dumps([
+                {"article_id": "article_001", "priority": 3},
+                {"article_id": "article_002", "priority": 5},
+                {"article_id": "article_003", "priority": 5},
+            ]), encoding="utf-8")
+            self.assertEqual(ResearchPackage.select_top(path, 2), ["article_002", "article_003"])
+            self.assertEqual(ResearchPackage.select_top(path, 9), ["article_002", "article_003", "article_001"])
+
+    def test_top_missing_recommendations_is_clear(self):
+        from research_package import ResearchPackage
+        with self.assertRaisesRegex(FileNotFoundError, "reading_recommendations.json not found"):
+            ResearchPackage.select_top(Path("missing-recommendations.json"), 5)
+
 
 if __name__ == "__main__":
     unittest.main()
