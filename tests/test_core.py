@@ -23,6 +23,12 @@ from paragraph_trace import ParagraphTracer
 from wsj_reader import _build_html, _register_dom_visit
 from cleaner import ArticleCleaner
 from models import Article
+from prompt_manager import PromptManager
+from prompt_context import PromptContext
+from models import ResearchNote
+from research_note import ResearchNoteGenerator, render_markdown
+from ai_quality import AIQualityValidator
+from workspace import WorkspaceManager
 
 
 class PdfCoreTests(unittest.TestCase):
@@ -72,13 +78,13 @@ class CleanerTests(unittest.TestCase):
 
 
 class ArticleModelTests(unittest.TestCase):
-    def test_defaults_are_independent_and_uuid_is_generated(self):
+    def test_defaults_are_independent_and_uuid_is_stable(self):
         first = Article()
         second = Article()
         self.assertTrue(first.uuid)
-        self.assertNotEqual(first.uuid, second.uuid)
+        self.assertEqual(first.uuid, second.uuid)
         self.assertEqual(first.title, "")
-        self.assertEqual(first.quality_score, 0.0)
+        self.assertEqual(first.quality_score, 100)
         self.assertEqual(first.paragraphs, [])
         first.paragraphs.append("Body")
         self.assertEqual(second.paragraphs, [])
@@ -96,6 +102,81 @@ class ArticleModelTests(unittest.TestCase):
         self.assertEqual(article.quality_score, 0.9)
         self.assertEqual(article.warnings, ["short"])
         self.assertIn("Article", repr(article))
+
+
+class PromptFrameworkTests(unittest.TestCase):
+    def test_load_and_replace_variables_and_version(self):
+        prompt = PromptManager.load("digest", {"title": "T", "subtitle": "", "publication": "P", "language": "en", "paragraphs": "Body", "topics": "AI", "metadata": ""})
+        self.assertIn("T", prompt)
+        self.assertEqual(PromptManager.version(prompt), "1.0")
+
+    def test_context_supports_article(self):
+        context = PromptContext.from_article(Article(title="T", paragraphs=["A", "B"], language="en"), "AI")
+        self.assertEqual(context["title"], "T")
+        self.assertEqual(context["paragraphs"], "A\n\nB")
+        self.assertEqual(context["topics"], "AI")
+
+    def test_missing_prompt_and_variable_are_clear(self):
+        with self.assertRaises(FileNotFoundError):
+            PromptManager.load("does_not_exist")
+        with self.assertRaises(KeyError):
+            PromptManager.load("digest", {})
+
+
+class ResearchNoteTests(unittest.TestCase):
+    class FakeService:
+        def _chat_json(self, system, user, max_tokens):
+            self.prompt = system
+            return {"summary": "Summary", "investment_takeaway": "Watch margins", "market_impact": "Bullish",
+                    "companies": ["NVIDIA"], "industries": ["AI"], "countries": ["US"],
+                    "risks": ["Valuation"], "opportunities": ["Demand"],
+                    "follow_up_questions": ["What is next?"], "confidence": "High"}
+
+    def test_generates_structured_note_through_prompt_framework(self):
+        note = ResearchNoteGenerator(self.FakeService()).generate(Article(title="AI", paragraphs=["Body"], language="en"))
+        self.assertIsInstance(note, ResearchNote)
+        self.assertEqual(note.companies, ["NVIDIA"])
+        self.assertIn("Executive Summary", render_markdown(note))
+
+    def test_generation_failure_is_clear(self):
+        class Failing:
+            def _chat_json(self, *args, **kwargs):
+                raise RuntimeError("provider unavailable")
+        with self.assertRaisesRegex(Exception, "Research note generation failed"):
+            ResearchNoteGenerator(Failing()).generate(Article(title="AI"))
+
+
+class AIQualityTests(unittest.TestCase):
+    def test_validates_research_note(self):
+        report = AIQualityValidator().validate({
+            "summary": "This is a sufficiently long investment summary.", "investment_takeaway": "Watch margins.",
+            "confidence": "High", "companies": [], "industries": [], "countries": [], "risks": [], "opportunities": [],
+        }, "investment", provider="test", model="model")
+        self.assertTrue(report.success)
+        self.assertEqual(report.prompt_version, "1.0")
+
+    def test_reports_missing_fields_and_none_tokens(self):
+        report = AIQualityValidator().validate({"summary": "short"}, "investment", usage={"total_tokens": None})
+        self.assertFalse(report.success)
+        self.assertIn("Missing field: companies", report.warnings)
+        self.assertIsNone(report.total_tokens)
+
+    def test_rejects_missing_prompt_version(self):
+        from unittest.mock import patch
+        with patch("ai_quality.PromptManager.load", return_value="prompt"):
+            report = AIQualityValidator().validate({"summary": "This is a sufficiently long summary."}, "investment")
+        self.assertIn("Prompt version missing", report.warnings)
+
+
+class WorkspaceTests(unittest.TestCase):
+    def test_create_load_and_relative_manifest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = WorkspaceManager.create(Path(temp) / "WSJ_2026-07-31", "WSJ", "2026-07-31")
+            manifest = WorkspaceManager.load(root)
+            self.assertEqual(manifest["publication"], "WSJ")
+            self.assertEqual(manifest["files"]["articles"], "articles.json")
+            self.assertFalse(any("\\" in value or ":" in value for value in manifest["files"].values()))
+            self.assertEqual(WorkspaceManager.find_latest(Path(temp)), root)
 
 
 class WsjCoreTests(unittest.TestCase):

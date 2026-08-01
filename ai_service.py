@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from ai_config import AIServiceConfig
+from prompt_context import PromptContext
+from prompt_manager import PromptManager
 
 
 class AIServiceError(Exception):
@@ -34,14 +36,7 @@ class AIService:
         self._config = config
 
     def summarize(self, text: str, topic_context: str = "", max_tokens: int = 300, timeout: int = 60) -> str:
-        system = (
-            "You are a concise financial-news analyst. Return ONLY valid JSON with exactly "
-            "these keys: summary, investment_relevance, matched_topics. "
-            "summary must be 2-3 sentences, investment_relevance must be an integer 1-5, "
-            "and matched_topics must be an array. Do not use markdown or code fences."
-        )
-        if topic_context:
-            system += "\nConfigured research topics:\n" + topic_context
+        system = PromptManager.load("digest", {"title": "", "subtitle": "", "publication": "", "language": "unknown", "paragraphs": "", "topics": topic_context, "metadata": ""})
         result = self._chat(system, text, max_tokens=max_tokens, timeout=timeout)
         return result["choices"][0]["message"]["content"].strip()
 
@@ -53,12 +48,8 @@ class AIService:
             "byline": article.get("byline", ""),
             "paragraphs": article.get("paragraphs", []),
         }
-        system = (
-            "You are a professional financial-news translator. Translate the supplied article "
-            "to natural Traditional Chinese. Preserve names, numbers, tickers, quotations and "
-            "paragraph order. Return ONLY valid JSON with exactly these keys: title, subtitle, "
-            "annotation, byline, paragraphs. paragraphs must be an array of strings."
-        )
+        context = PromptContext.from_article(article)
+        system = PromptManager.load("translation", context)
         return self._chat_json(system, json.dumps(source, ensure_ascii=False), max_tokens=4000)
 
     def list_models(self) -> list[dict[str, Any]]:
@@ -104,41 +95,28 @@ class AIService:
         return {"recommended": usable[0]["model"] if usable else "", "results": results}
 
     def expand_topics(self, topics: list[str]) -> dict[str, Any]:
-        system = (
-            "You are a bilingual financial research taxonomy assistant. Return ONLY valid JSON "
-            "with key topics. Each item must contain name_zh, keywords_zh, keywords_en, "
-            "and related_topics. Generate useful search terms, synonyms, abbreviations, "
-            "companies, technologies and adjacent concepts."
-        )
+        system = PromptManager.load("topic_filter", {
+            "title": "Topic expansion", "subtitle": "", "publication": "", "language": "unknown",
+            "paragraphs": json.dumps({"topics": topics}, ensure_ascii=False),
+            "topics": json.dumps(topics, ensure_ascii=False), "metadata": "",
+        })
         return self._chat_json(system, json.dumps({"topics": topics}, ensure_ascii=False), max_tokens=1800)
 
     def refresh_topic_aliases(self, topics: list[str], current_aliases: dict[str, Any]) -> dict[str, Any]:
-        system = (
-            "You are maintaining an investment research topic dictionary. Expand each topic with "
-            "separate categories: keywords, companies, products, technologies, and abbreviations. "
-            "keywords are general searchable terms. companies are public or investment-relevant "
-            "company names. products are commercial products. technologies are technical concepts. "
-            "abbreviations are short names. Include Chinese aliases, English aliases, synonyms, and "
-            "emerging terminology in the most appropriate category. Never merge everything into "
-            "keywords. Only include terms currently widely used. Remove obsolete terms. Avoid generic "
-            "words, common English words, and very ambiguous words. Prefer official names, industry "
-            "terminology, public company names, technology names, and product names. Return valid JSON "
-            "only. The JSON must be an object with key aliases. aliases maps each topic to an object "
-            "with keywords, companies, products, technologies, abbreviations, updated_at, and source."
-        )
+        system = PromptManager.load("topic_filter", {
+            "title": "Topic alias refresh", "subtitle": "", "publication": "", "language": "unknown",
+            "paragraphs": json.dumps({"topics": topics, "current_aliases": current_aliases}, ensure_ascii=False),
+            "topics": json.dumps(topics, ensure_ascii=False), "metadata": "",
+        })
         user = json.dumps({"topics": topics, "current_aliases": current_aliases}, ensure_ascii=False)
         return self._chat_json(system, user, max_tokens=3000)
 
     def screen_article(self, title: str, excerpt: str, topic_context: str) -> dict[str, Any]:
         """Screen a topic-matched article before spending tokens on a summary."""
-        system = (
-            "You are a financial research reading-list editor. Return ONLY valid JSON with "
-            "exactly these keys: recommend, priority, matched_topics, reason_zh, reason_en, "
-            "summary_zh, summary_en. recommend is boolean; priority is integer 1-5. "
-            "Only write summaries when recommend is true; otherwise use empty strings. "
-            "Keep both summaries concise (2-3 sentences), never translate the full article. "
-            "Judge relevance to the configured topics, investment usefulness, novelty and urgency."
-        )
+        system = PromptManager.load("recommendation", {
+            "title": title, "subtitle": "", "publication": "", "language": "unknown",
+            "paragraphs": excerpt[:3500], "topics": topic_context, "metadata": "",
+        })
         user = json.dumps({
             "topics": topic_context,
             "title": title,

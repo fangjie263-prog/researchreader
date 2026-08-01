@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
 from article_locator import ArticleLocator, ArticleNotFound
+from models import Article
 
 
 ROOT = Path(__file__).resolve().parent
@@ -18,13 +18,7 @@ class ArticleExtractionError(RuntimeError):
     """Raised when an article source cannot provide non-empty article text."""
 
 
-@dataclass
-class ArticleContent:
-    article_id: str
-    title: str
-    source_document: str
-    content: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+ArticleContent = Article
 
 
 class _VisibleTextParser(HTMLParser):
@@ -88,7 +82,7 @@ class ArticleExtractor:
 
     def extract(self, article_id: str) -> ArticleContent:
         article = self.locator.get(article_id)
-        source_document = article["source_document"]
+        source_document = article.source_document
         source_path = Path(source_document)
         if not source_path.is_absolute():
             source_path = self.source_root / source_path
@@ -100,17 +94,17 @@ class ArticleExtractor:
             raise ArticleExtractionError(f"Unsupported article source format: {source_document}")
         text = source_path.read_text(encoding="utf-8", errors="replace")
         if suffix == ".md":
-            content = _extract_markdown(text, article["title"])
+            content = _extract_markdown(text, article.title)
         else:
             parser = _VisibleTextParser()
             parser.feed(text)
             content = _clean_text(parser.parts)
         if not content:
             raise ArticleExtractionError(f"Article body is empty: {article_id}")
-        return ArticleContent(
-            article_id=article_id,
-            title=article["title"],
-            source_document=source_document,
-            content=content,
-            metadata={"source_path": str(source_path)},
-        )
+        article.paragraphs = content.splitlines()
+        article.metadata["source_path"] = str(source_path)
+        return article
+
+    def extract_dict(self, article_id: str) -> dict[str, Any]:
+        from article_factory import ArticleFactory
+        return ArticleFactory.to_dict(self.extract(article_id))

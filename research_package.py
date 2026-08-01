@@ -8,15 +8,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from article_translator import ArticleTranslator
+from research_note import ResearchNoteGenerator, render_markdown
+from ai_quality import AIQualityValidator
 
 ROOT = Path(__file__).resolve().parent
 RECOMMENDATIONS = ROOT / "output" / "reading_recommendations.json"
 
 
 class ResearchPackage:
-    def __init__(self, translator=None, output_root=ROOT / "output"):
+    def __init__(self, translator=None, output_root=ROOT / "output", note_generator=None):
         self.translator = translator or ArticleTranslator()
         self.output_root = Path(output_root)
+        self.note_generator = note_generator
 
     def create(self, article_id: str) -> Path:
         result = self.translator.translate(article_id)
@@ -38,6 +41,16 @@ class ResearchPackage:
         chinese = (package_dir / "article_zh.md").read_text(encoding="utf-8")
         bilingual = f"# {result.article.title}\n\nSource\n\n{result.article.source_document}\n\n## Original\n\n{original}\n\n## 中文翻译\n\n{chinese}\n"
         (package_dir / "bilingual.md").write_text(bilingual, encoding="utf-8")
+        generator = self.note_generator
+        if generator is None and hasattr(getattr(self.translator, "service", None), "_chat_json"):
+            generator = ResearchNoteGenerator(self.translator.service)
+        if generator is not None:
+            note = generator.generate(result.article)
+            (package_dir / "research_note.json").write_text(json.dumps(note.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            (package_dir / "investment_note.md").write_text(render_markdown(note), encoding="utf-8")
+            config = getattr(getattr(self.translator, "service", None), "_config", None)
+            report = AIQualityValidator().validate(note, "investment", provider=getattr(config, "base_url", "unknown"), model=getattr(config, "model", "unknown"))
+            (package_dir / "ai_quality.json").write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return package_dir
 
     def create_many(self, article_ids: list[str]) -> tuple[list[dict], list[dict]]:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from article_factory import ArticleFactory
+from models import Article
 
 
 ROOT = Path(__file__).resolve().parent
@@ -58,8 +60,11 @@ class ArticleLocator:
             articles[article_id] = article
         return articles
 
-    def get(self, article_id: str) -> dict[str, Any]:
+    def get(self, article_id: str) -> Article:
         try:
-            return self._articles[article_id]
+            return ArticleFactory.from_dict(self._articles[article_id])
         except KeyError as exc:
             raise ArticleNotFound(f"Article not found: {article_id}") from exc
+
+    def get_dict(self, article_id: str) -> dict[str, Any]:
+        return self._articles[article_id].copy()

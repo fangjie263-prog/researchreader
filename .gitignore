@@ -1,6 +1,8 @@
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.coverage
 
 # Virtual environments
 .venv/
@@ -20,6 +22,11 @@ work/outputs/
 # Local data
 books/
 output/
+.tools/
+tmp/
+benchmark.json
+*API*.bat
+*key*.txt
 .venv/
 ai_settings.json
 topics.json
