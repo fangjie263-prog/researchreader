@@ -238,6 +238,7 @@ class TopicFilter:
                 "matched_keywords": article.get("matched_keywords", []),
                 "preview": article.get("preview", ""),
                 "matched_topics": article.get("matched_topics", []),
+                "research_picks": article.get("research_picks", {}),
             })
 
         json_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")

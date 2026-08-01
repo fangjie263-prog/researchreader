@@ -11,6 +11,7 @@ from article_merger import ArticleMerger
 from cleaner import ArticleCleaner
 from continuation import ContinuationResolver
 from topic_filter import TopicFilter
+from research_picks import ResearchPicks
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -63,7 +64,8 @@ def read_epub(epub_path: str) -> tuple[str, dict[str, bytes], list[dict]]:
             continue
 
         html = item.get_content().decode("utf-8")
-        soup = BeautifulSoup(html, "lxml")
+        # EPUB content documents are XHTML/XML, not loose HTML.
+        soup = BeautifulSoup(html, "lxml-xml")
 
         # Skip files without article containers
         art_divs = soup.find_all("div", class_="art-cnt")
@@ -285,7 +287,11 @@ def _parse_article(art_div: Tag, base_dir: str, image_lookup: dict, image_map: d
                             seen_images.add(resolved)
                             safe = _save_image(resolved, image_lookup, image_map)
                             if safe:
-                                result["images"].append({"src": safe, "alt": alt})
+                                result["images"].append({
+                                    "src": safe,
+                                    "alt": alt,
+                                    "caption": caption_tag.get_text(" ", strip=True) if caption_tag else "",
+                                })
                                 if caption_tag:
                                     caption = f"[Image: {caption_tag.get_text(strip=True)}]"
                                     result["paragraphs"].append(caption)
@@ -424,6 +430,7 @@ def main() -> None:
     ContinuationResolver().resolve(articles)
     topic_filter = TopicFilter()
     candidates = topic_filter.filter_articles(articles)
+    ResearchPicks().enrich(candidates)
     topic_filter.write_reports(candidates, OUTPUT_DIR)
     topic_filter.print_stats()
 
@@ -452,7 +459,14 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
     toc_entries = ""
     for idx, art in enumerate(articles, start=1):
         title = art["title"] if art["title"] else "Untitled"
-        toc_entries += f'<li><a href="#article-{idx}">{idx}. {title}</a></li>\n'
+        picks = art.get("research_picks") if isinstance(art.get("research_picks"), dict) else {}
+        rating = html.escape(str(picks.get("rating", "")))
+        read_time = html.escape(str(picks.get("estimated_read_time", "")))
+        companies = picks.get("companies", [])[:3]
+        topics = picks.get("sectors", [])[:1]
+        company_buttons = " ".join(f'<button class="toc-filter" data-company="{html.escape(str(c), quote=True)}">{html.escape(str(c))}</button>' for c in companies)
+        topic_buttons = " ".join(f'<button class="toc-filter" data-topic="{html.escape(str(t), quote=True)}">{html.escape(str(t))}</button>' for t in topics)
+        toc_entries += f'<li class="toc-entry" data-article-index="{idx}"><a href="#article-{idx}">{idx}. {html.escape(title)}</a> <span class="toc-rating">{rating}</span> <span class="toc-time">{read_time}</span> <span class="toc-tags">{company_buttons} {topic_buttons}</span> <span class="toc-state">□ ☆</span></li>\n'
 
     # Build article sections
     article_sections = ""
@@ -461,7 +475,10 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
         source = art.get("_source", "")
 
         # Heading
-        section = f'<section id="article-{idx}">\n'
+        picks = art.get("research_picks") if isinstance(art.get("research_picks"), dict) else {}
+        rating = picks.get("rating", "")
+        section = f'<section id="article-{idx}" class="article" data-rating="{html.escape(str(rating), quote=True)}" data-article-index="{idx}">\n'
+        section += '<div class="article-tools"><button class="complete-btn" type="button">□</button><button class="bookmark-btn" type="button">☆</button></div>\n'
         section += f'<h2>{title}</h2>\n'
 
         # Source filename (small grey text)
@@ -479,6 +496,21 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
         # Annotation
         if art["annotation"]:
             section += f'<blockquote class="annotation">{art["annotation"]}</blockquote>\n'
+        picks = art.get("research_picks")
+        if isinstance(picks, dict):
+            section += '<div class="research-picks">\n'
+            section += f'<p class="analysis-stars">{html.escape(str(picks.get("rating", "")))}</p>\n'
+            section += f'<p><strong>Estimated reading time:</strong> {html.escape(str(picks.get("estimated_read_time", "")))}</p>\n'
+            if picks.get("companies"):
+                section += f'<p><strong>Companies:</strong> {html.escape(", ".join(picks["companies"]))}</p>\n'
+            if picks.get("sectors"):
+                section += f'<p><strong>Sectors:</strong> {html.escape(", ".join(picks["sectors"]))}</p>\n'
+            for label in ("why_it_matters", "market_impact"):
+                values = picks.get(label, [])
+                if values:
+                    section += f'<p><strong>{"Why it matters" if label == "why_it_matters" else "Market impact"}</strong></p><ul>\n'
+                    section += "".join(f'<li>{html.escape(str(value))}</li>\n' for value in values[:3]) + '</ul>\n'
+            section += '</div>\n'
         # Analysis
         analysis = art.get("analysis")
         if isinstance(analysis, dict):
@@ -498,14 +530,37 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
             section += '</div>\n'
 
 # Paragraphs
-        for para in art["paragraphs"]:
+        paragraphs = art["paragraphs"]
+        index = 0
+        while index < len(paragraphs):
+            para = paragraphs[index]
             text = para["text"] if isinstance(para, dict) else para
-            tag = "h3" if isinstance(para, dict) and para.get("type") == "section_heading" else "p"
+            if text == "◆":
+                bullets = []
+                while index < len(paragraphs):
+                    item = paragraphs[index]
+                    item_text = item["text"] if isinstance(item, dict) else item
+                    if item_text != "◆":
+                        break
+                    bullets.append(item_text)
+                    index += 1
+                section += "<ul>\n" + "".join(f"<li>{html.escape(item)}</li>\n" for item in bullets) + "</ul>\n"
+                continue
+            tag = "h3" if (
+                isinstance(para, dict) and para.get("type") == "section_heading"
+            ) or text in {"Business & Finance", "Worldwide"} else "p"
             section += f'<{tag}>{html.escape(text)}</{tag}>\n'
+            index += 1
 
         # Images
         for img in art["images"]:
-            section += f'<figure><img src="images/{img["src"]}" alt="{img["alt"]}"><figcaption>[Image]</figcaption></figure>\n'
+            caption = img.get("caption") or img.get("alt") or "[Image]"
+            section += (
+                f'<figure><img loading="lazy" decoding="async" '
+                f'src="images/{html.escape(img["src"], quote=True)}" '
+                f'alt="{html.escape(img.get("alt", ""), quote=True)}">'
+                f'<figcaption>{html.escape(caption)}</figcaption></figure>\n'
+            )
 
         # Back to contents link
         section += '<p class="back-link"><a href="#toc">Back to Contents</a></p>\n'
@@ -675,6 +730,22 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
     padding-top: 1rem;
     border-top: 1px solid #eee;
   }}
+  .reading-toolbar {{ display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin:.75rem 0 1.25rem; }}
+  .reading-toolbar button, .article-tools button {{ cursor:pointer; border:1px solid #cbd5e1; background:#fff; border-radius:4px; padding:.35rem .6rem; }}
+  .reading-toolbar button.active {{ background:#1a5276; color:#fff; }}
+  #progress {{ margin-left:auto; color:#64748b; font-size:.85rem; }}
+  .article {{ position:relative; }}
+  .article-tools {{ position:absolute; right:0; top:0; display:flex; gap:.25rem; }}
+  .article-tools button {{ border:0; font-size:1.2rem; padding:.1rem .3rem; }}
+  .article.bookmarked .bookmark-btn {{ color:#d97706; }}
+  .article.completed .complete-btn {{ color:#15803d; }}
+  .article.research-collapsed .research-picks {{ display:none; }}
+  .toc-entry {{ margin:.45rem 0; }}
+  .toc-rating {{ color:#d97706; }}
+  .toc-time {{ color:#64748b; font-size:.85rem; }}
+  .toc-filter {{ border:0; background:#eef2ff; color:#334155; border-radius:3px; cursor:pointer; padding:.15rem .3rem; margin:.1rem; }}
+  .toc-entry.completed .toc-state {{ color:#15803d; }}
+  .toc-entry.bookmarked .toc-state {{ color:#d97706; }}
   @media (max-width: 600px) {{
     body {{ padding: 0; }}
     .container {{
@@ -692,6 +763,7 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
 
   <nav id="toc">
     <h2>Table of Contents</h2>
+    <div class="reading-toolbar"><button type="button" data-mode="essentials">Today's Essentials</button><button type="button" data-mode="research">Today's Research</button><button type="button" data-mode="full">Full Issue</button><button type="button" data-mode="bookmarks">My Picks</button><span id="progress"></span></div>
     <ol>
 {toc_entries}    </ol>
   </nav>
@@ -702,6 +774,28 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
     <p>WSJReader — EPUB to HTML</p>
   </footer>
 </div>
+<script>
+(function () {{
+  const storageKey = 'researchreader-reading-state';
+  const state = JSON.parse(localStorage.getItem(storageKey) || '{{"completed":{{}},"bookmarks":{{}},"collapsed":{{}}}}');
+  const articles = [...document.querySelectorAll('.article')];
+  const progress = document.getElementById('progress');
+  function save() {{ localStorage.setItem(storageKey, JSON.stringify(state)); }}
+  function updateProgress() {{ const shown = articles.filter(a => !a.hidden); progress.textContent = `${{shown.filter(a => state.completed[a.dataset.articleIndex]).length}} / ${{shown.length}} articles completed`; }}
+  function apply(mode) {{
+    document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    articles.forEach(a => {{ const r = a.dataset.rating || ''; const entry = document.querySelector(`.toc-entry[data-article-index="${{a.dataset.articleIndex}}"]`); const company = state.filterCompany; const topic = state.filterTopic; const keepMode = mode === 'full' || (mode === 'essentials' && (r.startsWith('★★★★★') || r.startsWith('★★★★☆'))) || (mode === 'research' && r.length >= 3 && !r.startsWith('★☆☆☆☆') && !r.startsWith('★★☆☆☆')) || (mode === 'bookmarks' && state.bookmarks[a.dataset.articleIndex]); const keepCompany = !company || entry?.querySelector(`[data-company="${{CSS.escape(company)}}"]`); const keepTopic = !topic || entry?.querySelector(`[data-topic="${{CSS.escape(topic)}}"]`); a.hidden = !(keepMode && keepCompany && keepTopic); if (entry) entry.hidden = a.hidden; }});
+    state.mode = mode; save(); updateProgress();
+  }}
+  articles.forEach(a => {{ const id = a.dataset.articleIndex; const entry = document.querySelector(`.toc-entry[data-article-index="${{id}}"]`); const refreshState = () => {{ if (entry) {{ entry.classList.toggle('completed', !!state.completed[id]); entry.classList.toggle('bookmarked', !!state.bookmarks[id]); entry.querySelector('.toc-state').textContent = `${{state.completed[id] ? '✓' : '□'}} ${{state.bookmarks[id] ? '★' : '☆'}}`; }} }}; if (state.completed[id]) a.classList.add('completed'); if (state.bookmarks[id]) a.classList.add('bookmarked'); if (state.collapsed[id]) a.classList.add('research-collapsed'); refreshState(); a.querySelector('.complete-btn').onclick = () => {{ state.completed[id] = !state.completed[id]; a.classList.toggle('completed', state.completed[id]); refreshState(); save(); updateProgress(); }}; a.querySelector('.bookmark-btn').onclick = () => {{ state.bookmarks[id] = !state.bookmarks[id]; a.classList.toggle('bookmarked', state.bookmarks[id]); refreshState(); save(); }}; const card = a.querySelector('.research-picks'); if (card) card.onclick = () => {{ state.collapsed[id] = !state.collapsed[id]; a.classList.toggle('research-collapsed', state.collapsed[id]); save(); }}; }});
+  document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => apply(b.dataset.mode));
+  document.querySelectorAll('.toc-filter').forEach(b => b.onclick = e => {{ e.preventDefault(); const isCompany = b.dataset.company !== undefined; const value = isCompany ? b.dataset.company : b.dataset.topic; const key = isCompany ? 'filterCompany' : 'filterTopic'; state[key] = state[key] === value ? '' : value; apply(state.mode || 'full'); }});
+  let current = -1; function move(step) {{ const shown = articles.filter(a => !a.hidden); current = Math.max(0, Math.min(shown.length - 1, current + step)); shown[current]?.scrollIntoView({{behavior:'smooth', block:'start'}}); }}
+  document.addEventListener('keydown', e => {{ if (['INPUT','TEXTAREA','BUTTON'].includes(document.activeElement.tagName)) return; if (e.key === 'j') move(1); if (e.key === 'k') move(-1); if (e.key === 'b' && current >= 0) articles.filter(a => !a.hidden)[current]?.querySelector('.bookmark-btn').click(); if (e.key === 'f') apply(state.mode === 'essentials' ? 'research' : state.mode === 'research' ? 'full' : 'essentials'); }});
+  articles.forEach(a => {{ const entry = document.querySelector(`.toc-entry[data-article-index="${{a.dataset.articleIndex}}"]`); const id = a.dataset.articleIndex; if (entry) {{ entry.classList.toggle('completed', !!state.completed[id]); entry.classList.toggle('bookmarked', !!state.bookmarks[id]); entry.querySelector('.toc-state').textContent = `${{state.completed[id] ? '✓' : '□'}} ${{state.bookmarks[id] ? '★' : '☆'}}`; }} }});
+  apply(state.mode || 'essentials');
+}})();
+</script>
 </body>
 </html>"""
     return html_output

@@ -52,6 +52,15 @@ class AIService:
         system = PromptManager.load("translation", context)
         return self._chat_json(system, json.dumps(source, ensure_ascii=False), max_tokens=4000)
 
+    def generate_insight(self, article: Any) -> dict[str, Any]:
+        """Generate structured article insight without entity extraction."""
+        context = PromptContext.from_article(article)
+        picks = article.get("research_picks", {}) if isinstance(article, dict) else {}
+        context["companies"] = ", ".join(picks.get("companies", [])) if isinstance(picks, dict) else ""
+        context["sectors"] = ", ".join(picks.get("sectors", [])) if isinstance(picks, dict) else ""
+        prompt = PromptManager.load("article_insight", context)
+        return self._chat_json(prompt, context["paragraphs"], max_tokens=1200)
+
     def list_models(self) -> list[dict[str, Any]]:
         """Return models from the provider's standard /models endpoint."""
         result = self._request_json(self._config.base_url.rstrip("/") + "/models", timeout=30)

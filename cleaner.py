@@ -17,7 +17,8 @@ class ArticleCleaner:
         self.audit["articles"] += 1
         paragraphs = []
         for paragraph in result.get("paragraphs", []):
-            text = str(paragraph).strip()
+            paragraph_type = paragraph.get("type") if isinstance(paragraph, dict) else None
+            text = str(paragraph.get("text", "") if isinstance(paragraph, dict) else paragraph).strip()
             if text.startswith("[Image:"):
                 self.audit["captions_recovered"] += 1
             if self._is_noise(text):
@@ -32,6 +33,9 @@ class ArticleCleaner:
                 self.audit["email_lines_removed"] += 1
                 if not text:
                     continue
+            if paragraph_type == "image_caption" or text.startswith("[Image:"):
+                paragraphs.append({"text": text, "type": "image_caption"})
+                continue
             if self._is_heading(text, paragraphs, result.get("paragraphs", [])):
                 paragraphs.append({"text": text, "type": "section_heading"})
                 self.audit["section_headings"] += 1

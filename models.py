@@ -112,3 +112,12 @@ class AIQualityReport:
             "completion_tokens": self.completion_tokens, "total_tokens": self.total_tokens,
             "success": self.success, "warnings": list(self.warnings), "score": self.score,
         }
+
+
+@dataclass
+class ArticleInsight:
+    summary: str = ""
+    why_it_matters: list[str] = field(default_factory=list)
+    market_impact: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    follow_up_questions: list[str] = field(default_factory=list)

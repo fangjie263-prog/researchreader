@@ -29,6 +29,10 @@ from models import ResearchNote
 from research_note import ResearchNoteGenerator, render_markdown
 from ai_quality import AIQualityValidator
 from workspace import WorkspaceManager
+from regression_validation import validate_articles
+from research_picks import ResearchPicks
+from article_insight import ArticleInsightBuilder, ArticleInsightError, render_insight
+from models import ArticleInsight
 
 
 class PdfCoreTests(unittest.TestCase):
@@ -70,6 +74,12 @@ class CleanerTests(unittest.TestCase):
         cleaned = cleaner.clean({"title": "Story", "paragraphs": ["Normal body.", "New frontier", "More body.", "[Image: A real caption]"]})
         self.assertEqual(cleaned["paragraphs"][1], {"text": "New frontier", "type": "section_heading"})
         self.assertEqual(cleaner.audit["captions_recovered"], 1)
+
+    def test_preserves_caption_type_instead_of_heading(self):
+        cleaned = ArticleCleaner().clean({"title": "Story", "paragraphs": [
+            {"text": "[Image: A real caption]", "type": "image_caption"}
+        ]})
+        self.assertEqual(cleaned["paragraphs"], [{"text": "[Image: A real caption]", "type": "image_caption"}])
 
     def test_corrects_noisy_subtitle_without_deleting_body(self):
         cleaned = ArticleCleaner().clean({"title": "Title", "subtitle": "A long description: details", "paragraphs": ["Business"]})
@@ -179,6 +189,49 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(WorkspaceManager.find_latest(Path(temp)), root)
 
 
+class RegressionValidationTests(unittest.TestCase):
+    def test_detects_duplicate_title_annotation_body_and_caption_heading(self):
+        report = validate_articles([
+            {"title": "Same", "annotation": "Deck", "paragraphs": ["Repeated body"]},
+            {"title": "Same", "annotation": "Deck", "paragraphs": ["Repeated body"]},
+            {"title": "Other", "paragraphs": [{"type": "section_heading", "text": "[Image: caption]"}]},
+        ])
+        self.assertFalse(report["passed"])
+        self.assertEqual(report["duplicate_titles"], ["same"])
+        self.assertEqual(report["duplicate_annotations"], ["deck"])
+        self.assertEqual(len(report["body_duplicates_over_90_percent"]), 1)
+        self.assertEqual(len(report["caption_headings"]), 1)
+
+
+class ResearchPicksTests(unittest.TestCase):
+    def test_enriches_candidate_without_ai(self):
+        articles = [{"title": "AI chips", "local_score": 96, "paragraphs": ["NVIDIA GPU demand is rising."], "matched_topics": ["人工智能"]}]
+        result = ResearchPicks().enrich(articles)
+        picks = result[0]["research_picks"]
+        self.assertEqual(picks["rating"], "★★★★★")
+        self.assertIn("NVIDIA", picks["companies"])
+        self.assertIn("AI", picks["sectors"])
+
+
+class ArticleInsightTests(unittest.TestCase):
+    class FakeService:
+        def _chat_json(self, *args, **kwargs):
+            return {"summary": "A concise finding", "why_it_matters": ["Demand changes"], "market_impact": ["Watch margins"], "risks": ["Execution"], "follow_up_questions": ["What happens next?"]}
+
+    def test_generates_structured_insight_and_limits_lists(self):
+        insight = ArticleInsightBuilder(self.FakeService()).generate({"title": "AI", "paragraphs": ["Body"], "research_picks": {"companies": ["NVIDIA"], "sectors": ["AI"]}})
+        self.assertIsInstance(insight, ArticleInsight)
+        self.assertEqual(insight.companies if hasattr(insight, "companies") else [], [])
+        self.assertIn("Summary", render_insight(insight))
+
+    def test_generation_failure_is_clear(self):
+        class Failing:
+            def _chat_json(self, *args, **kwargs):
+                raise RuntimeError("provider unavailable")
+        with self.assertRaisesRegex(ArticleInsightError, "generation failed"):
+            ArticleInsightBuilder(Failing()).generate({"title": "AI", "paragraphs": ["Body"]})
+
+
 class WsjCoreTests(unittest.TestCase):
     def test_articles_with_same_title_are_merged_and_deduplicated(self):
         from wsj_reader import merge_articles
@@ -260,6 +313,37 @@ class DuplicateReportTests(unittest.TestCase):
         ], emit_log=False)[0]
         merged = ArticleMerger().merge([first, {"title": "Story", "images": [{"src": "a.png"}, {"src": "b.png"}]}], emit_log=False)
         self.assertEqual([image["src"] for image in merged[0]["images"]], ["a.png", "b.png"])
+
+    def test_similar_titles_are_merged_and_receive_stable_id(self):
+        first = {"title": "OpenAI expands its AI business", "byline": "Jane Doe", "paragraphs": ["The company announced a major plan."], "images": []}
+        second = {"title": "OpenAI expands its AI business!", "byline": "Jane Doe", "paragraphs": ["The company announced a major plan."], "images": []}
+        merged = ArticleMerger().merge([first, second], emit_log=False)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["article_id"], ArticleMerger.fingerprint(first))
+
+    def test_matching_opening_body_and_image_merges_different_titles(self):
+        opening = ["Same opening paragraph.", "Same second paragraph.", "Same third paragraph."]
+        merged = ArticleMerger().merge([
+            {"title": "Short title", "byline": "A", "paragraphs": opening, "images": [{"src": "shared.png"}]},
+            {"title": "Different title", "byline": "B", "paragraphs": opening, "images": [{"src": "shared.png"}]},
+        ], emit_log=False)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["paragraphs"], opening)
+
+    def test_annotation_is_not_repeated_inside_merged_body(self):
+        merged = ArticleMerger().merge([
+            {"title": "Story", "annotation": "Deck", "paragraphs": ["Body"]},
+            {"title": "Story", "annotation": "Deck", "paragraphs": ["Deck", "Body 2"]},
+        ], emit_log=False)
+        self.assertEqual(merged[0]["paragraphs"], ["Body", "Body 2"])
+
+    def test_validation_reports_duplicate_metadata_and_fingerprints(self):
+        warnings = ArticleMerger.validate([
+            {"title": "A", "byline": "Author", "annotation": "Deck", "paragraphs": ["Body"]},
+            {"title": "B", "byline": "Author", "annotation": "Deck", "paragraphs": ["Body"]},
+        ])
+        self.assertIn("Duplicate annotations detected", warnings)
+        self.assertIn("Duplicate authors detected", warnings)
 
     def test_merges_articles_with_identical_titles(self):
         merged = ArticleMerger().merge([
