@@ -8,6 +8,7 @@ from ebooklib import epub, ITEM_IMAGE, ITEM_DOCUMENT
 from ai_model import AIConfig
 from ai_processor import analyze_articles
 from article_merger import ArticleMerger
+from cleaner import ArticleCleaner
 from continuation import ContinuationResolver
 from topic_filter import TopicFilter
 # ---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ def read_epub(epub_path: str) -> tuple[str, dict[str, bytes], list[dict]]:
             article = _parse_article(art_div, base_dir, image_lookup, image_map)
             articles.append(article)
 
+    articles = ArticleCleaner().clean_articles(articles)
     return book_title, image_map, ArticleMerger().merge(articles)
 
 
@@ -333,7 +335,7 @@ def to_markdown(article: dict) -> str:
         lines.append("")
 
     for para in article["paragraphs"]:
-        lines.append(para)
+        lines.append(para["text"] if isinstance(para, dict) else para)
         lines.append("")
 
     for img in article["images"]:
@@ -497,7 +499,9 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
 
 # Paragraphs
         for para in art["paragraphs"]:
-            section += f'<p>{para}</p>\n'
+            text = para["text"] if isinstance(para, dict) else para
+            tag = "h3" if isinstance(para, dict) and para.get("type") == "section_heading" else "p"
+            section += f'<{tag}>{html.escape(text)}</{tag}>\n'
 
         # Images
         for img in art["images"]:
@@ -510,7 +514,7 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
 
         article_sections += section
 
-    html = f"""<!DOCTYPE html>
+    html_output = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -700,7 +704,7 @@ def _build_html(book_title: str, date_str: str, articles: list[dict], image_map:
 </div>
 </body>
 </html>"""
-    return html
+    return html_output
 
 
 def render_html(book_title: str, articles: list[dict], image_map: dict[str, bytes]) -> Path:

@@ -20,7 +20,9 @@ from article_merger import ArticleMerger
 from continuation import ContinuationLink, ContinuationMerger, ContinuationResolver
 from parser_debug import ParserDebugger
 from paragraph_trace import ParagraphTracer
-from wsj_reader import _register_dom_visit
+from wsj_reader import _build_html, _register_dom_visit
+from cleaner import ArticleCleaner
+from models import Article
 
 
 class PdfCoreTests(unittest.TestCase):
@@ -46,6 +48,54 @@ class PdfCoreTests(unittest.TestCase):
         self.assertIn("# Book", markdown)
         self.assertIn("Source: book.pdf", markdown)
         self.assertIn("Text", markdown)
+
+
+class CleanerTests(unittest.TestCase):
+    def test_removes_noise_and_email_but_keeps_editorial_text(self):
+        article = {"title": "Story", "byline": "Author email: a@example.com", "paragraphs": [
+            "Advertisement", "email: a@example.com", "To the Editor:", "Politics", "Normal body."
+        ]}
+        cleaned = ArticleCleaner().clean(article)
+        self.assertEqual(cleaned["paragraphs"], ["To the Editor:", "Politics", "Normal body."])
+        self.assertNotIn("@", cleaned["byline"])
+
+    def test_detects_section_heading_and_caption(self):
+        cleaner = ArticleCleaner()
+        cleaned = cleaner.clean({"title": "Story", "paragraphs": ["Normal body.", "New frontier", "More body.", "[Image: A real caption]"]})
+        self.assertEqual(cleaned["paragraphs"][1], {"text": "New frontier", "type": "section_heading"})
+        self.assertEqual(cleaner.audit["captions_recovered"], 1)
+
+    def test_corrects_noisy_subtitle_without_deleting_body(self):
+        cleaned = ArticleCleaner().clean({"title": "Title", "subtitle": "A long description: details", "paragraphs": ["Business"]})
+        self.assertEqual(cleaned["subtitle"], "")
+        self.assertEqual(cleaned["paragraphs"], ["Business"])
+
+
+class ArticleModelTests(unittest.TestCase):
+    def test_defaults_are_independent_and_uuid_is_generated(self):
+        first = Article()
+        second = Article()
+        self.assertTrue(first.uuid)
+        self.assertNotEqual(first.uuid, second.uuid)
+        self.assertEqual(first.title, "")
+        self.assertEqual(first.quality_score, 0.0)
+        self.assertEqual(first.paragraphs, [])
+        first.paragraphs.append("Body")
+        self.assertEqual(second.paragraphs, [])
+
+    def test_fields_initialize_and_dataclass_behaves_normally(self):
+        article = Article(
+            uuid="article-1", title="Title", subtitle="Subtitle", author="Author",
+            source="source.epub", paragraphs=["Body"], images=[{"src": "a.png"}],
+            metadata={"page": 1}, quality_score=0.9, warnings=["short"],
+        )
+        self.assertEqual(article.uuid, "article-1")
+        self.assertEqual(article.title, "Title")
+        self.assertEqual(article.images, [{"src": "a.png"}])
+        self.assertEqual(article.metadata["page"], 1)
+        self.assertEqual(article.quality_score, 0.9)
+        self.assertEqual(article.warnings, ["short"])
+        self.assertIn("Article", repr(article))
 
 
 class WsjCoreTests(unittest.TestCase):
@@ -107,6 +157,28 @@ class DuplicateReportTests(unittest.TestCase):
         ], emit_log=False)[0]
         merged = ArticleMerger().merge([first, {"title": "Story", "paragraphs": ["CDEFG"]}], emit_log=False)
         self.assertEqual(merged[0]["paragraphs"], ["ABCDEFG"])
+
+    def test_deduplicates_same_images_and_keeps_first(self):
+        merged = ArticleMerger().merge([
+            {"title": "Story", "images": [{"src": "a.png", "alt": "first"}]},
+            {"title": "Story", "images": [{"src": "a.png", "alt": "second"}, {"src": "b.png"}]},
+        ], emit_log=False)
+        self.assertEqual(merged[0]["images"], [{"src": "a.png", "alt": "first"}, {"src": "b.png"}])
+
+    def test_keeps_different_images_in_original_order(self):
+        merged = ArticleMerger().merge([
+            {"title": "Story", "images": [{"src": "b.png"}]},
+            {"title": "Story", "images": [{"src": "a.png"}, {"src": "c.png"}]},
+        ], emit_log=False)
+        self.assertEqual([image["src"] for image in merged[0]["images"]], ["b.png", "a.png", "c.png"])
+
+    def test_repeated_image_merge_does_not_grow_images(self):
+        first = ArticleMerger().merge([
+            {"title": "Story", "images": [{"src": "a.png"}]},
+            {"title": "Story", "images": [{"src": "b.png"}]},
+        ], emit_log=False)[0]
+        merged = ArticleMerger().merge([first, {"title": "Story", "images": [{"src": "a.png"}, {"src": "b.png"}]}], emit_log=False)
+        self.assertEqual([image["src"] for image in merged[0]["images"]], ["a.png", "b.png"])
 
     def test_merges_articles_with_identical_titles(self):
         merged = ArticleMerger().merge([
@@ -332,6 +404,12 @@ class ParagraphTracerTests(unittest.TestCase):
 
 
 class DomGuardTests(unittest.TestCase):
+    def test_build_html_escapes_text_without_local_html_shadowing(self):
+        rendered = _build_html("Book", "2026-08-01", [{
+            "title": "A & B", "subtitle": "", "annotation": "", "byline": "",
+            "paragraphs": ["x < y"], "images": [], "_source": "source.epub",
+        }], {})
+        self.assertIn("x &lt; y", rendered)
     def test_same_dom_node_is_detected_on_second_visit(self):
         seen: set[int] = set()
         node = object()

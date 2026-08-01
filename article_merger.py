@@ -80,7 +80,16 @@ class ArticleMerger:
     def _merge_images(target: dict, article: dict) -> None:
         if "images" in target or "images" in article:
             target.setdefault("images", [])
-            target["images"].extend(article.get("images", []))
+            images = target["images"] + list(article.get("images", []))
+            seen: set[str] = set()
+            deduped: list = []
+            for image in images:
+                src = str(image.get("src", "")) if isinstance(image, dict) else ""
+                if src in seen:
+                    continue
+                seen.add(src)
+                deduped.append(image)
+            target["images"] = deduped
 
     def merge(self, articles: list[dict], *, emit_log: bool = True) -> list[dict]:
         if not articles:
@@ -93,6 +102,7 @@ class ArticleMerger:
 
         before = len(articles)
         original_paragraphs = sum(len(article.get("paragraphs", [])) for article in articles)
+        original_images = sum(len(article.get("images", [])) for article in articles)
         merged: list[dict] = []
         index_by_title: dict[str, int] = {}
         for article in articles:
@@ -119,4 +129,8 @@ class ArticleMerger:
             print(f"After overlap merge: {after_overlap}")
             print(f"After deduplication: {after_overlap}")
             print(f"Removed duplicates: {original_paragraphs - after_overlap}")
+            images_after = sum(len(article.get("images", [])) for article in merged)
+            print(f"Images before: {original_images}")
+            print(f"Images after: {images_after}")
+            print(f"Images removed: {original_images - images_after}")
         return merged

@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 from article_merger import ArticleMerger
+from cleaner import ArticleCleaner
 from topic_filter import TopicFilter
 
 
@@ -135,6 +136,7 @@ def read_pdf(pdf_path: str | Path) -> tuple[str, list[dict]]:
         )
     if not articles:
         raise ValueError("PDF contains no pages")
+    articles = ArticleCleaner().clean_articles(articles)
     return title, ArticleMerger().merge(articles)
 
 
@@ -168,7 +170,7 @@ def _render_html(title: str, source_name: str, articles: list[dict]) -> str:
     sections: list[str] = []
     for index, article in enumerate(articles, start=1):
         paragraphs = "\n".join(
-            f"<p>{html.escape(paragraph)}</p>"
+            f"<p>{html.escape(paragraph.get('text', '')) if isinstance(paragraph, dict) else html.escape(str(paragraph))}</p>"
             for paragraph in article.get("paragraphs", [])
         ) or '<p class="empty">No extractable text on this page.</p>'
         sections.append(
